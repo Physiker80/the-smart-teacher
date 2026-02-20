@@ -4,7 +4,7 @@ import { Save, ArrowRight, User, School, Book, ShieldCheck, Award, TrendingUp, F
 
 interface ProfileViewProps {
     user: UserProfile;
-    onUpdateUser: (updatedUser: UserProfile) => void;
+    onUpdateUser: (updatedUser: UserProfile) => Promise<void> | void;
     onBack: () => void;
 }
 
@@ -23,16 +23,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ user, onUpdateUser, on
         setFormData({ ...formData, [e.target.name]: e.target.value });
     };
 
-    const handleSave = () => {
+    const handleSave = async () => {
         setIsSaving(true);
-        // Simulate API call
-        setTimeout(() => {
-            onUpdateUser({
+        try {
+            await onUpdateUser({
                 ...user,
                 ...formData
             });
+        } finally {
             setIsSaving(false);
-        }, 1000);
+        }
     };
 
     // Default Stats if missing

@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { ArrowRight, Music, BookOpen, Play, Pause, Heart, Star, Volume2, VolumeX, Clock, Sparkles, Download, FileText, Music2, Image as ImageIcon, Loader2, X, Camera, CameraOff, RotateCcw, Check, Upload, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SongItem, StoryItem } from '../types';
 import { generateSongOrStory } from '../services/geminiService';
+import { createResource, fetchResourcesByType } from '../services/syncService';
 
 interface SongsStoriesProps {
     onBack: () => void;
@@ -43,6 +44,37 @@ export const SongsStories: React.FC<SongsStoriesProps> = ({ onBack, initialTopic
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // --- LOAD SAVED ---
+    useEffect(() => {
+        const loadSavedContent = async () => {
+            try {
+                // Load Songs
+                const savedSongs = await fetchResourcesByType('song');
+                if (savedSongs?.length) {
+                    const parsedSongs = savedSongs.map(r => r.data as SongItem).filter(Boolean);
+                    setSongs(prev => {
+                        // Prevent duplicates
+                        const unique = parsedSongs.filter(s => !prev.some(p => p.id === s.id));
+                        return [...unique, ...prev];
+                    });
+                }
+
+                // Load Stories
+                const savedStories = await fetchResourcesByType('story');
+                if (savedStories?.length) {
+                    const parsedStories = savedStories.map(r => r.data as StoryItem).filter(Boolean);
+                    setStories(prev => {
+                        const unique = parsedStories.filter(s => !prev.some(p => p.id === s.id));
+                        return [...unique, ...prev];
+                    });
+                }
+            } catch (err) {
+                console.error("Failed to load saved songs/stories:", err);
+            }
+        };
+        loadSavedContent();
+    }, []);
 
     const [songs, setSongs] = useState<SongItem[]>([
         {
@@ -292,7 +324,23 @@ export const SongsStories: React.FC<SongsStoriesProps> = ({ onBack, initialTopic
         setIsGenerating(true);
         try {
             const fileData = capturedImage ? { mimeType: capturedImage.mimeType, data: capturedImage.data } : undefined;
-            const newItem = await generateSongOrStory(topicInput, activeTab === 'songs' ? 'song' : 'story', gradeInput, fileData);
+            const generatedItem = await generateSongOrStory(topicInput, activeTab === 'songs' ? 'song' : 'story', gradeInput, fileData);
+            
+            // Save to DB
+            const resourceType = activeTab === 'songs' ? 'song' : 'story';
+            const savedResource = await createResource({
+                title: generatedItem.title,
+                type: resourceType,
+                tags: [generatedItem.subject, generatedItem.grade],
+                data: generatedItem
+            });
+
+            // Use the saved resource ID or merge properties if needed
+            const newItem = {
+                ...generatedItem,
+                id: savedResource.id // Sync with DB ID
+            };
+
             if (activeTab === 'songs') {
                 setSongs([newItem as SongItem, ...songs]);
             } else {

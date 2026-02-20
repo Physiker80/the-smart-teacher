@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, Music, Play, Pause, Save, Share2, Sparkles, ArrowRight, Disc, Volume2, SkipBack, SkipForward, FileText, Edit2, Check, Download } from 'lucide-react';
 import * as geminiService from '../services/geminiService';
+import { createResource, fetchResourcesByType } from '../services/syncService';
 import { SongItem } from '../types';
 
 interface MelodyStudioProps {
@@ -22,40 +23,35 @@ export const MelodyStudio: React.FC<MelodyStudioProps> = ({ onBack }) => {
     const [recentSongs, setRecentSongs] = useState<SongItem[]>([]);
 
     useEffect(() => {
-        const saved = localStorage.getItem('st_melody_studio_songs');
-        if (saved) {
+        const loadSongs = async () => {
             try {
-                setRecentSongs(JSON.parse(saved));
+                const res = await fetchResourcesByType('song');
+                if (res) {
+                    const sorted = res.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                    const mapped = sorted.map(r => r.data as SongItem).filter(Boolean);
+                    setRecentSongs(mapped.slice(0, 10));
+                }
             } catch (e) {
                 console.error("Failed to load songs", e);
             }
-        }
+        };
+        loadSongs();
     }, []);
 
-    const saveSongToStorage = (newSong: SongItem) => {
-        // 1. Save to Melody Studio Recent List
-        const updatedSongs = [newSong, ...recentSongs.filter(s => s.id !== newSong.id)].slice(0, 10);
-        setRecentSongs(updatedSongs);
-        localStorage.setItem('st_melody_studio_songs', JSON.stringify(updatedSongs));
-
-        // 2. Save to Teacher Resources (Global)
-        const resources = JSON.parse(localStorage.getItem('st_resources') || '[]');
-        const newResource: any = {
-            id: newSong.id,
-            title: newSong.title,
-            type: 'song',
-            tags: ['melody-studio', newSong.musicalStyle, grade],
-            createdAt: new Date().toISOString(),
-            data: newSong // Store full song data
-        };
-        // Check if exists
-        const existingIndex = resources.findIndex((r: any) => r.id === newSong.id);
-        if (existingIndex >= 0) {
-            resources[existingIndex] = newResource;
-        } else {
-            resources.push(newResource);
+    const saveSongToStorage = async (newSong: SongItem) => {
+        try {
+            await createResource({
+                title: newSong.title,
+                type: 'song',
+                tags: ['melody-studio', newSong.musicalStyle, grade],
+                data: newSong
+            });
+            // Update local state immediately (optimistic)
+            setRecentSongs(prev => [newSong, ...prev].slice(0, 10));
+        } catch (e) {
+            console.error("Failed to save song", e);
+            alert("حدث خطأ أثناء الحفظ.");
         }
-        localStorage.setItem('st_resources', JSON.stringify(resources));
     };
 
     // TTS Playback Effect

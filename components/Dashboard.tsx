@@ -4,6 +4,9 @@ import { Sparkles, Camera, BookOpen, Star, Trophy, Crown, ScrollText, PlayCircle
 import { WellnessWidget } from './WellnessWidget';
 import { ThemeSelector } from './ThemeSelector';
 import { TokenUsageWidget } from './TokenUsageWidget';
+import { fetchCalendarEvents } from '../services/syncService';
+import { fetchTeacherClasses } from '../services/classService';
+import { supabase } from '../services/supabaseClient';
 
 interface DashboardProps {
     user: UserProfile;
@@ -24,9 +27,10 @@ interface DashboardProps {
     onPrivateVault: () => void;
     onCurriculumAgent: () => void;
     onStudentOasis: () => void;
+    onOasisCommandCenter: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, recentPlans, onNewLesson, onViewLesson, onGamification, onSimulation, onSongs, onCalendar, onClassManager, onProfile, onLogout, currentTheme, onThemeChange, onStoryWeaver, onMelodyStudio, onPrivateVault, onCurriculumAgent, onStudentOasis }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, recentPlans, onNewLesson, onViewLesson, onGamification, onSimulation, onSongs, onCalendar, onClassManager, onProfile, onLogout, currentTheme, onThemeChange, onStoryWeaver, onMelodyStudio, onPrivateVault, onCurriculumAgent, onStudentOasis, onOasisCommandCenter }) => {
     // Default stats if not present
     const stats = user.stats || {
         level: 12,
@@ -38,23 +42,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, recentPlans, onNewLe
 
     const xpPercentage = (stats.xp / stats.nextLevelXp) * 100;
 
-    // --- REAL DATA FROM LOCALSTORAGE ---
+    // --- REAL DATA FROM SUPABASE ---
     const [upcomingEvents, setUpcomingEvents] = useState<CalendarEvent[]>([]);
     const [classes, setClasses] = useState<ClassRoom[]>([]);
     const [bottomTab, setBottomTab] = useState<'recent' | 'upcoming'>('upcoming');
 
     useEffect(() => {
-        try {
-            const evtRaw = localStorage.getItem('st_calendar_events');
-            if (evtRaw) {
-                const all: CalendarEvent[] = JSON.parse(evtRaw);
-                const today = new Date().toISOString().split('T')[0];
-                const future = all.filter(e => e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-                setUpcomingEvents(future.slice(0, 5));
+        const loadDashboardData = async () => {
+             try {
+                // Get current user ID
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                if (!authUser) return;
+
+                // 1. Fetch Calendar Events
+                const allEvents = await fetchCalendarEvents();
+                if (allEvents) {
+                     const today = new Date().toISOString().split('T')[0];
+                     const future = allEvents.filter(e => e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+                     setUpcomingEvents(future.slice(0, 5));
+                }
+
+                // 2. Fetch Classes
+                const remoteClasses = await fetchTeacherClasses(authUser.id);
+                if (remoteClasses) {
+                    setClasses(remoteClasses);
+                }
+
+            } catch (e) { 
+                console.error('Dashboard data load error:', e); 
             }
-            const clsRaw = localStorage.getItem('st_classes');
-            if (clsRaw) setClasses(JSON.parse(clsRaw));
-        } catch (e) { console.error('Dashboard data load error:', e); }
+        };
+        
+        loadDashboardData();
     }, []);
 
     // --- COMPUTED STATS ---
@@ -417,6 +436,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, recentPlans, onNewLe
                             <div>
                                 <h3 className="text-xl font-black text-white mb-1.5 group-hover:text-amber-400 transition-colors">واحة التلميذ</h3>
                                 <p className="text-xs text-slate-400 leading-relaxed">رحلة الطالب التعليمية، الكنوز، والتحديات الممتعة.</p>
+                            </div>
+                        </div>
+                    </button>
+
+                    {/* Module 11: Oasis Command Center (Teacher View) */}
+                    <button
+                        onClick={onOasisCommandCenter}
+                        className="group relative h-56 bg-gradient-to-br from-emerald-950/40 via-slate-900/60 to-slate-900/40 backdrop-blur-sm border border-emerald-500/20 rounded-2xl p-7 text-right overflow-hidden transition-all duration-300 hover:scale-[1.03] hover:border-emerald-500/60 hover:shadow-[0_8px_40px_rgba(16,185,129,0.15)]"
+                    >
+                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-emerald-500/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <div className="absolute -right-8 -top-8 w-40 h-40 bg-emerald-500/8 rounded-full blur-3xl group-hover:bg-emerald-500/15 transition-all duration-500"></div>
+                        <div className="absolute -left-4 -bottom-4 w-24 h-24 bg-emerald-400/5 rounded-full blur-2xl group-hover:bg-emerald-400/10 transition-all duration-500"></div>
+
+                        <div className="relative z-10 flex flex-col h-full justify-between">
+                            <div className="flex items-start justify-between">
+                                <div className="w-14 h-14 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/25 group-hover:shadow-emerald-500/40 transition-all duration-300">
+                                    <Activity size={26} />
+                                </div>
+                                <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300">التحكم</span>
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black text-white mb-1.5 group-hover:text-emerald-400 transition-colors">مركز قيادة الواحة</h3>
+                                <p className="text-xs text-slate-400 leading-relaxed">إدارة الفصل التفاعلي وإرسال المهام للطلاب لحظياً.</p>
                             </div>
                         </div>
                     </button>

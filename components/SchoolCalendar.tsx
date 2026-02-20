@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CalendarEvent } from '../types';
+import { fetchCalendarEvents, createCalendarEvent, deleteCalendarEvent } from '../services/syncService';
 import {
     ArrowLeft, ChevronRight, ChevronLeft, Plus, X, CalendarDays,
     BookOpen, Gamepad2, GraduationCap, PartyPopper, Clock, Trash2,
@@ -14,7 +15,6 @@ interface SchoolCalendarProps {
 
 type CalendarView = 'day' | 'week' | 'month' | 'year';
 
-const STORAGE_KEY = 'st_calendar_events';
 const WEEKDAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 const WEEKDAYS_SHORT = ['أحد', 'اثن', 'ثلا', 'أرب', 'خمي', 'جمع', 'سبت'];
 const MONTHS_AR = [
@@ -76,11 +76,7 @@ export const SchoolCalendar: React.FC<SchoolCalendarProps> = ({ onBack, initialE
     const [newNotes, setNewNotes] = useState('');
 
     useEffect(() => {
-        try { const s = localStorage.getItem(STORAGE_KEY); if (s) setEvents(JSON.parse(s)); } catch { }
-    }, []);
-
-    const saveEvents = useCallback((u: CalendarEvent[]) => {
-        setEvents(u); localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+        fetchCalendarEvents().then(setEvents).catch(console.error);
     }, []);
 
     const todayStr = fmtDate(today.getFullYear(), today.getMonth(), today.getDate());
@@ -117,26 +113,76 @@ export const SchoolCalendar: React.FC<SchoolCalendarProps> = ({ onBack, initialE
         setShowAddModal(true);
     };
 
-    const handleAddEvent = () => {
+    const handleAddEvent = async () => {
         if (!newTitle.trim() || !selectedDate) return;
-        saveEvents([...events, { id: `evt-${Date.now()}`, title: newTitle.trim(), date: selectedDate, time: newTime, type: newType, subject: newSubject.trim() || undefined, grade: newGrade.trim() || undefined, notes: newNotes.trim() || undefined, relatedPlanId: initialEvent?.planId }]);
+        try {
+            const added = await createCalendarEvent({
+                title: newTitle.trim(), date: selectedDate, time: newTime, type: newType,
+                subject: newSubject.trim() || undefined, grade: newGrade.trim() || undefined,
+                notes: newNotes.trim() || undefined
+            });
+            const localEvt: CalendarEvent = {
+                 id: added.id,
+                 title: added.title,
+                 date: added.date,
+                 time: added.time,
+                 type: added.type,
+                 subject: added.details?.subject,
+                 grade: added.details?.grade,
+                 notes: added.details?.notes,
+                 relatedClassId: added.related_class_id
+            };
+            setEvents([...events, localEvt]);
+        } catch(e) { console.error(e); }
         setShowAddModal(false); setNewTitle(''); setNewNotes('');
     };
 
-    const handleDeleteEvent = (id: string) => saveEvents(events.filter(e => e.id !== id));
+    const handleDeleteEvent = async (id: string) => {
+        try {
+            await deleteCalendarEvent(id);
+            setEvents(events.filter(e => e.id !== id));
+        } catch(e) { console.error(e); }
+    };
 
     // ===== IMPORT =====
     const toast = (msg: string, ms = 3000) => { setImportToast(msg); setTimeout(() => setImportToast(null), ms); };
 
+    const bulkCreateEvents = async (newEvents: CalendarEvent[]) => {
+        try {
+            const added: CalendarEvent[] = [];
+            for (const e of newEvents) {
+                const res = await createCalendarEvent({
+                    title: e.title, date: e.date, time: e.time, type: e.type,
+                    subject: e.subject, grade: e.grade, notes: e.notes
+                });
+                added.push({
+                    id: res.id,
+                    title: res.title,
+                    date: res.date,
+                    time: res.time,
+                    type: res.type,
+                    subject: res.details?.subject,
+                    grade: res.details?.grade,
+                    notes: res.details?.notes,
+                    relatedClassId: res.related_class_id
+                } as CalendarEvent);
+            }
+            if(added.length > 0) setEvents(prev => [...prev, ...added]);
+        } catch (e) {
+            console.error(e);
+            toast('حدث خطأ أثناء حفظ الأحداث', 3000);
+        }
+    };
+
     const handleImportHolidays = () => {
         const hols = getSyrianHolidays(currentYear);
         const existing = new Set(events.map(e => e.title + e.date));
-        const nw = hols.filter(h => !existing.has(h.title + h.date)).map(h => ({
+        const nw: CalendarEvent[] = hols.filter(h => !existing.has(h.title + h.date)).map(h => ({
             id: `evt-hol-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             title: h.title, date: h.date, time: '', type: 'event' as CalendarEvent['type'], notes: 'عطلة رسمية 🎌',
         }));
         if (nw.length === 0) toast('العطل الرسمية موجودة بالفعل ✅');
-        else { saveEvents([...events, ...nw]); toast(`تم استيراد ${nw.length} عطلة رسمية ✅`); }
+        else { bulkCreateEvents(nw); toast(`تم استيراد ${nw.length} عطلة رسمية ✅`); }
         setShowImportModal(false);
     };
 
@@ -169,7 +215,7 @@ export const SchoolCalendar: React.FC<SchoolCalendarProps> = ({ onBack, initialE
                         imp.push({ id: `evt-imp-${Date.now()}-${i}`, title: gf('SUMMARY') || 'حدث', date: ds, time: dt.length >= 13 ? `${dt.slice(9, 11)}:${dt.slice(11, 13)}` : '', type: 'event', notes: gf('DESCRIPTION') });
                     });
                 }
-                if (imp.length > 0) { saveEvents([...events, ...imp]); toast(`تم استيراد ${imp.length} حدث ✅`); }
+                if (imp.length > 0) { bulkCreateEvents(imp); toast(`تم استيراد ${imp.length} حدث ✅`); }
                 else toast('لم يتم العثور على أحداث في الملف ⚠️');
             } catch { toast('خطأ في قراءة الملف ❌'); }
             setShowImportModal(false);
@@ -181,6 +227,7 @@ export const SchoolCalendar: React.FC<SchoolCalendarProps> = ({ onBack, initialE
         const f = e.target.files?.[0]; if (!f) return;
         setImportToast('جاري تحليل الصورة... ⏳');
         try {
+            // @ts-ignore
             const Tesseract = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js');
             const worker = await Tesseract.createWorker('ara+eng');
             const { data } = await worker.recognize(f);
@@ -196,7 +243,7 @@ export const SchoolCalendar: React.FC<SchoolCalendarProps> = ({ onBack, initialE
                     ext.push({ id: `evt-ocr-${Date.now()}-${i}`, title: line.replace(dp, '').replace(/[-\/,;:|]+/g, ' ').trim() || `حدث ${i + 1}`, date: ds, time: '', type: 'event' });
                 }
             });
-            if (ext.length > 0) { saveEvents([...events, ...ext]); toast(`تم استخراج ${ext.length} حدث من الصورة ✅`, 5000); }
+            if (ext.length > 0) { bulkCreateEvents(ext); toast(`تم استخراج ${ext.length} حدث من الصورة ✅`, 5000); }
             else toast(`تم قراءة النص لكن لم يُعثر على تواريخ`, 5000);
         } catch { toast('تعذر تحليل الصورة — تأكد من اتصالك بالإنترنت ❌', 5000); }
         setShowImportModal(false); e.target.value = '';

@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { generateGame } from '../services/geminiService';
+import { createResource } from '../services/syncService';
 import { GameScenario, GameChallenge } from '../types';
 import {
     Gamepad2, Map, Search, Rocket, Trees, ArrowRight, Star,
@@ -87,15 +88,23 @@ export const GameForge: React.FC<GameForgeProps> = ({ onBack, initialTopic, init
         }
     };
 
-    const handleSaveGame = () => {
+    const handleSaveGame = async () => {
         if (!gameScenario) return;
-        const saved = JSON.parse(localStorage.getItem('st_saved_games') || '[]');
-        saved.push({
-            ...gameScenario,
-            savedAt: new Date().toISOString()
-        });
-        localStorage.setItem('st_saved_games', JSON.stringify(saved));
-        alert('تم حفظ اللعبة في الأرشيف!');
+        try {
+            await createResource({
+                title: gameScenario.title,
+                type: 'game',
+                tags: [gameScenario.subject, gameScenario.grade],
+                data: {
+                    ...gameScenario,
+                    savedAt: new Date().toISOString()
+                }
+            });
+            alert('تم حفظ اللعبة في المصادر بنجاح!');
+        } catch (error) {
+            console.error("Failed to save game", error);
+            alert("حدث خطأ أثناء حفظ اللعبة.");
+        }
     };
 
     // --- Renders ---

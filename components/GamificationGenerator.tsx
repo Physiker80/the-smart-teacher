@@ -251,18 +251,18 @@ export const GamificationGenerator: React.FC<GamificationGeneratorProps> = ({ on
 
             // 1. Title Slide
             const slide1 = pres.addSlide({ masterName: "MASTER" });
-            slide1.addText(gameData.title, { x: 0, y: 1.5, w: "100%", fontSize: 44, bold: true, align: "center", color: "ffffff", rtl: true });
-            slide1.addText(gameData.targetGrade, { x: 0, y: 2.5, w: "100%", fontSize: 24, color: "a855f7", align: "center", rtl: true });
-            slide1.addText(gameData.storyline, { x: "10%", y: 3.5, w: "80%", fontSize: 18, color: "cbd5e1", align: "center", rtl: true });
+            slide1.addText(gameData.title, { x: 0, y: 1.5, w: "100%", fontSize: 44, bold: true, align: "center", color: "ffffff", rtl: true } as any);
+            slide1.addText(gameData.targetGrade, { x: 0, y: 2.5, w: "100%", fontSize: 24, color: "a855f7", align: "center", rtl: true } as any);
+            slide1.addText(gameData.storyline, { x: "10%", y: 3.5, w: "80%", fontSize: 18, color: "cbd5e1", align: "center", rtl: true } as any);
 
             // 2. Instructions Slide
             const slide2 = pres.addSlide({ masterName: "MASTER" });
-            slide2.addText("طريقة اللعب والأهداف", { x: "5%", y: 0.5, w: "90%", fontSize: 32, bold: true, color: "a855f7", align: "right", rtl: true });
+            slide2.addText("طريقة اللعب والأهداف", { x: "5%", y: 0.5, w: "90%", fontSize: 32, bold: true, color: "a855f7", align: "right", rtl: true } as any);
 
             let instructionsText = `طريقة اللعب:\n${gameData.howToPlay}\n\nالأهداف التعليمية:\n`;
             (gameData.objectives || []).forEach(obj => instructionsText += `• ${obj}\n`);
 
-            slide2.addText(instructionsText, { x: "5%", y: 1.5, w: "90%", h: 4, fontSize: 18, color: "ffffff", align: "right", rtl: true, valign: "top" });
+            slide2.addText(instructionsText, { x: "5%", y: 1.5, w: "90%", h: 4, fontSize: 18, color: "ffffff", align: "right", rtl: true, valign: "top" } as any);
 
             // 3. Challenge Slides
             (gameData.challenges || []).forEach((challenge, index) => {
@@ -271,14 +271,14 @@ export const GamificationGenerator: React.FC<GamificationGeneratorProps> = ({ on
                 // Header
                 slide.addText(`المحطة ${index + 1}: ${challenge.type === 'quiz' ? 'سؤال معرفي' : 'نشاط حركي'}`, {
                     x: "5%", y: 0.5, w: "90%", fontSize: 24, bold: true, color: "fbbf24", align: "right", rtl: true
-                });
+                } as any);
 
                 // Content Layout (Text Right, Image Left if exists)
                 if (challenge.imageUrl) {
-                    slide.addText(challenge.text, { x: "50%", y: 1.5, w: "45%", h: 4, fontSize: 20, color: "ffffff", align: "right", rtl: true, valign: "top" });
+                    slide.addText(challenge.text, { x: "50%", y: 1.5, w: "45%", h: 4, fontSize: 20, color: "ffffff", align: "right", rtl: true, valign: "top" } as any);
                     slide.addImage({ data: challenge.imageUrl, x: "5%", y: 1.5, w: "40%", h: 3.5, sizing: { type: "contain", w: "40%", h: 3.5 } });
                 } else {
-                    slide.addText(challenge.text, { x: "10%", y: 1.5, w: "80%", h: 3, fontSize: 24, color: "ffffff", align: "center", rtl: true });
+                    slide.addText(challenge.text, { x: "10%", y: 1.5, w: "80%", h: 3, fontSize: 24, color: "ffffff", align: "center", rtl: true } as any);
                 }
 
                 // Options if Quiz
@@ -289,7 +289,7 @@ export const GamificationGenerator: React.FC<GamificationGeneratorProps> = ({ on
                         const color = isCorrect ? "22c55e" : "94a3b8"; // Green if correct
                         slide.addText((isCorrect ? "✔ " : "• ") + opt, {
                             x: "10%", y: yPos, w: "80%", fontSize: 16, color: color, align: "right", rtl: true
-                        });
+                        } as any);
                         yPos += 0.4;
                     });
                 }
@@ -297,15 +297,15 @@ export const GamificationGenerator: React.FC<GamificationGeneratorProps> = ({ on
 
             // 4. Rewards Slide
             const rewardSlide = pres.addSlide({ masterName: "MASTER" });
-            rewardSlide.addText("لوحة الشرف والمكافآت", { x: "5%", y: 0.5, w: "90%", fontSize: 32, bold: true, color: "eab308", align: "right", rtl: true });
+            rewardSlide.addText("لوحة الشرف والمكافآت", { x: "5%", y: 0.5, w: "90%", fontSize: 32, bold: true, color: "eab308", align: "right", rtl: true } as any);
 
             // Badges
             let badgesText = "الأوسمة المتاحة:\n";
             (gameData.rewardSystem.badges || []).forEach(b => badgesText += `🏅 ${b}\n`);
-            rewardSlide.addText(badgesText, { x: "50%", y: 1.5, w: "45%", h: 4, fontSize: 20, color: "ffffff", align: "right", rtl: true });
+            rewardSlide.addText(badgesText, { x: "50%", y: 1.5, w: "45%", h: 4, fontSize: 20, color: "ffffff", align: "right", rtl: true } as any);
 
             // Epic Win
-            rewardSlide.addText(`لحظة الفوز:\n${gameData.rewardSystem.epicWin}`, { x: "50%", y: 4, w: "45%", h: 2, fontSize: 16, color: "cbd5e1", align: "right", rtl: true });
+            rewardSlide.addText(`لحظة الفوز:\n${gameData.rewardSystem.epicWin}`, { x: "50%", y: 4, w: "45%", h: 2, fontSize: 16, color: "cbd5e1", align: "right", rtl: true } as any);
 
             // Reward Image
             if (gameData.rewardSystem.imageUrl) {
@@ -378,7 +378,7 @@ export const GamificationGenerator: React.FC<GamificationGeneratorProps> = ({ on
                             rows: tableRows,
                             width: { size: 100, type: WidthType.PERCENTAGE },
                             bidiVisual: true,
-                        }),
+                        } as any),
                         new Paragraph({ text: "" }),
                         new Paragraph({ text: "نظام المكافآت:", heading: HeadingLevel.HEADING_2, alignment: AlignmentType.RIGHT }),
                         new Paragraph({ text: "الأوسمة المقترحة:", heading: HeadingLevel.HEADING_3, alignment: AlignmentType.RIGHT }),

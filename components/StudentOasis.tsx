@@ -1,11 +1,15 @@
+/// <reference types="vite/client" />
 import React, { useState, useEffect, useRef } from 'react';
 import { CurriculumBook, CurriculumLesson, KeyVisual } from '../types';
 import { getAllCurricula } from '../services/curriculumService';
+import { supabase } from '../services/supabaseClient';
+import { getStudentTasks, completeTask, OasisTask } from '../services/oasisService';
 import { GoogleGenAI } from "@google/genai";
 import { 
     Map, Scroll, Trophy, MessageCircle, Star, Palette, FlaskConical, 
     Compass, X, Send, User, ChevronRight, Lock, Unlock, PlayCircle,
-    Award, Crown, Layout, Zap, BookOpen, Mic, Volume2, CheckCircle, HelpCircle
+    Award, Crown, Layout, Zap, BookOpen, Mic, Volume2, CheckCircle, HelpCircle,
+    Bell, Gift
 } from 'lucide-react';
 
 // Initialize Gemini for "Little Aleem"
@@ -35,6 +39,7 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
     const [selectedBook, setSelectedBook] = useState<CurriculumBook | null>(null);
     const [activeLesson, setActiveLesson] = useState<CurriculumLesson | null>(null);
     const [viewMode, setViewMode] = useState<'map' | 'lesson-player'>('map');
+    const [currentSlide, setCurrentSlide] = useState(0); // Track slide progress
     const [unlockedLessons, setUnlockedLessons] = useState<string[]>([]); // Using lesson names/ids
     const [chatOpen, setChatOpen] = useState(false);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -44,6 +49,115 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
     const [isChatLoading, setIsChatLoading] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [teacherNote, setTeacherNote] = useState(''); // For admin broadcast input
+    
+    // --- Supabase Sync Dependencies ---
+    const [userId, setUserId] = useState<string | null>( userParams?.name === 'زائر' ? null : null ); // Initialize from props if possible, else logic below
+    const [xp, setXp] = useState(840);
+    const [level, setLevel] = useState(12);
+    const [oasisTasks, setOasisTasks] = useState<OasisTask[]>([]);
+    const [activeTask, setActiveTask] = useState<OasisTask | null>(null);
+
+    // Initialize User & Sync
+    useEffect(() => {
+        const initSupabase = async () => {
+            // 1. Check for logged in user via Supabase Auth
+            const { data: { session } } = await supabase.auth.getSession();
+            let effectiveUserId = session?.user?.id;
+
+            // Fallback for demo/guest mode if no auth session
+            if (!effectiveUserId) {
+                 effectiveUserId = localStorage.getItem('smart_teacher_student_id');
+                 if (!effectiveUserId) {
+                      effectiveUserId = crypto.randomUUID();
+                      localStorage.setItem('smart_teacher_student_id', effectiveUserId);
+                 }
+            }
+
+            setUserId(effectiveUserId);
+
+            // 2. Fetch User Data (or create if missing)
+            let { data: profile } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', effectiveUserId)
+                .maybeSingle();
+            
+            if (!profile) {
+                // Profile doesn't exist (new guest or wiped DB), so create it
+                const newProfile = { 
+                    id: effectiveUserId, 
+                    full_name: userParams?.name || 'زائر', 
+                    role: 'student', 
+                    xp: 840, 
+                    level: 12 
+                };
+                const { error: insertError } = await supabase.from('profiles').insert([newProfile]);
+                
+                if (!insertError) {
+                    profile = newProfile;
+                } else {
+                    console.error("Error creating student profile:", insertError);
+                }
+            }
+            
+            if (profile) {
+                setXp(profile.xp || 840);
+                setLevel(profile.level || 12);
+            }
+
+            // 3. Fetch Unlocked Lessons
+            const { data: progress } = await supabase
+                .from('student_progress')
+                .select('lesson_title')
+                .eq('student_id', effectiveUserId);
+            
+            if (progress && progress.length > 0) {
+                 const dbUnlocked = progress.map(p => p.lesson_title);
+                 setUnlockedLessons(prev => Array.from(new Set([...prev, ...dbUnlocked])));
+            } else {
+                 // If no progress, ensure first lesson is unlocked (usually handled by local state init, but double check)
+            }
+            
+            // 4. Listen for Teacher Broadcasts and New Tasks (Realtime)
+            const channel = supabase
+                .channel('public:teacher_broadcasts')
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'teacher_broadcasts' }, (payload) => {
+                    if (payload.new.active) {
+                        alert(`📢 تنبيه من المعلم: ${payload.new.message}`);
+                    }
+                })
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'oasis_tasks' }, (payload) => {
+                    // Check if task is for this student or class (simplified check)
+                    const newTask = payload.new as OasisTask;
+                    setOasisTasks(prev => [newTask, ...prev]);
+                    // Auto-open if it's high priority or "Grandfather & Mansour" rule implies visual disruption
+                    setActiveTask(newTask);
+                })
+                .subscribe();
+
+            // Initial fetch of tasks
+            if (effectiveUserId) {
+                 getStudentTasks(effectiveUserId).then(tasks => setOasisTasks(tasks));
+            }
+
+            return () => {
+                supabase.removeChannel(channel);
+            };
+        };
+
+        initSupabase();
+    }, []);
+
+    // Sync XP to DB when changed
+    useEffect(() => {
+        if (!userId) return;
+        const syncXp = async () => {
+            await supabase.from('profiles').update({ xp, level }).eq('id', userId);
+        };
+        // Debounce slightly to avoid spamming DB but here we just run it
+        const timer = setTimeout(syncXp, 1000);
+        return () => clearTimeout(timer);
+    }, [xp, level, userId]);
 
     // Load curricula on mount
     useEffect(() => {
@@ -62,10 +176,18 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
     const handleSendMessage = async () => {
         if (!chatInput.trim()) return;
 
+        const updatedContext = [...chatMessages, { role: 'user', content: chatInput }];
         const newUserMsg: ChatMessage = { id: Date.now().toString(), sender: 'user', text: chatInput };
         setChatMessages(prev => [...prev, newUserMsg]);
         setChatInput('');
         setIsChatLoading(true);
+
+        // SYNC: Save User Message
+        if (userId) {
+            await supabase.from('chat_history').insert([
+                { student_id: userId, sender: 'user', text: chatInput }
+            ]);
+        }
 
         try {
             const response = await ai.models.generateContent({
@@ -80,12 +202,33 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
 
             const newAleemMsg: ChatMessage = { id: (Date.now() + 1).toString(), sender: 'aleem', text: responseText };
             setChatMessages(prev => [...prev, newAleemMsg]);
+
+            // SYNC: Save Aleem Message
+            if (userId) {
+                await supabase.from('chat_history').insert([
+                    { student_id: userId, sender: 'aleem', text: responseText }
+                ]);
+            }
         } catch (error) {
             console.error("Chat Error:", error);
             setChatMessages(prev => [...prev, { id: 'err', sender: 'aleem', text: 'عذراً يا صديقي، حدث خطأ بسيط في الاتصال. هل يمكنك إعادة السؤال؟' }]);
         } finally {
             setIsChatLoading(false);
         }
+    };
+
+    const sendTeacherBroadcast = async () => {
+        if (!teacherNote.trim()) return;
+        
+        // Optimistic UI update (not really needed as we listen to channel, but good for feedback)
+        
+        // SYNC: Send to Supabase
+        await supabase.from('teacher_broadcasts').insert([
+            { message: teacherNote, type: 'note', active: true } 
+        ]);
+        
+        setTeacherNote('');
+        alert('✅ تم إرسال الملاحظة للطلاب!');
     };
 
     // --- Admin/Teacher Monitoring Overlay ---
@@ -128,7 +271,7 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
                                     onChange={(e) => setTeacherNote(e.target.value)}
                                     className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[10px] text-white focus:border-red-500 outline-none"
                                 />
-                                <button className="p-1.5 bg-red-500 hover:bg-red-600 text-white rounded transition-colors">
+                                <button onClick={sendTeacherBroadcast} className="p-1.5 bg-red-500 hover:bg-red-600 text-white rounded transition-colors">
                                     <Send size={12} />
                                 </button>
                             </div>
@@ -160,9 +303,136 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
         );
     };
 
+    // --- Active Task Overlay (Grandfather/Mansour Style) ---
+    const renderActiveTask = () => {
+        if (!activeTask) return null;
+
+        const bgTexture = activeTask.visualStyle === 'wood' 
+            ? 'https://www.transparenttextures.com/patterns/wood-pattern.png' 
+            : activeTask.visualStyle === 'stone'
+            ? 'https://www.transparenttextures.com/patterns/asfalt-dark.png'
+            : 'https://www.transparenttextures.com/patterns/aged-paper.png';
+
+        const bgColor = activeTask.visualStyle === 'wood' 
+            ? 'bg-amber-900 text-amber-100 border-amber-700'
+            : activeTask.visualStyle === 'stone'
+            ? 'bg-slate-800 text-slate-100 border-slate-600'
+            : 'bg-[#fdfbf7] text-slate-900 border-amber-200'; // Paper
+
+        return (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-300">
+                <div className={`relative max-w-lg w-full rounded-sm shadow-2xl overflow-hidden p-8 ${bgColor}`}>
+                    
+                    {/* Texture Overlay */}
+                    <div className="absolute inset-0 opacity-20 pointer-events-none mix-blend-multiply" style={{ backgroundImage: `url("${bgTexture}")` }}></div>
+
+                    {/* Content */}
+                    <div className="relative z-10 flex flex-col items-center text-center gap-4">
+                        <div className="w-16 h-16 rounded-full border-4 border-current opacity-20 flex items-center justify-center mb-2">
+                             <Gift size={32} />
+                        </div>
+                        
+                        <h2 className="text-2xl font-bold font-serif">{activeTask.title}</h2>
+                        
+                        <div className="w-full h-px bg-current opacity-20 my-2" />
+                        
+                        <p className="text-lg leading-relaxed font-serif">
+                            {activeTask.content}
+                        </p>
+
+                        <div className="mt-8 flex gap-4 w-full">
+                            <button 
+                                onClick={() => setActiveTask(null)}
+                                className="flex-1 py-3 px-4 rounded border border-current opacity-50 hover:opacity-100 transition-opacity font-bold"
+                            >
+                                إخفاء مؤقت
+                            </button>
+                            <button 
+                                onClick={async () => {
+                                    await completeTask(activeTask.id, 100); // Mock score
+                                    setOasisTasks(prev => prev.filter(t => t.id !== activeTask.id));
+                                    setActiveTask(null);
+                                    setXp(prev => prev + 50);
+                                    alert("🎉 أحسنت! اكتشفت كنزاً جديداً");
+                                }}
+                                className="flex-1 py-3 px-4 rounded bg-emerald-600 text-white hover:bg-emerald-500 font-bold shadow-lg"
+                            >
+                                لقد فهمت! (إنهاء)
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Decorative Corners */}
+                    <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-current opacity-50"></div>
+                    <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-current opacity-50"></div>
+                    <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-current opacity-50"></div>
+                    <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-current opacity-50"></div>
+                </div>
+            </div>
+        );
+    };
+
+
+    const handleLessonCompletion = async () => {
+        if (!activeLesson || !selectedBook || !userId) return;
+
+        // 1. Award XP & Level
+        const newXp = xp + 50;
+        setXp(newXp);
+        const newLevel = Math.floor(newXp / 1000) + 1;
+        if (newLevel > level) {
+             alert(`🎉 مبروك! لقد وصلت للمستوى ${newLevel}!`);
+             setLevel(newLevel);
+        }
+
+        // 2. Unlock Next Lesson locally
+        const currentIdx = selectedBook.curriculumStructure.findIndex(l => l.lessonTitle === activeLesson.lessonTitle);
+        let nextLessonTitle = '';
+        if (currentIdx >= 0 && currentIdx < selectedBook.curriculumStructure.length - 1) {
+            nextLessonTitle = selectedBook.curriculumStructure[currentIdx + 1].lessonTitle;
+            if (!unlockedLessons.includes(nextLessonTitle)) {
+                setUnlockedLessons(prev => [...prev, nextLessonTitle]);
+            }
+        }
+
+        // 3. Persist to DB
+        try {
+            // Save Progress
+            const { error } = await supabase.from('student_progress').insert({
+                student_id: userId,
+                // We verify unlocking the NEXT one
+                // Or better, we log completion of CURRENT one.
+                // The unlocking logic on load checks 'lesson_title' in progress table.
+                // If we store COMPLETED lessons, we should store currentLessonTitle.
+                // Re-reading init logic: const dbUnlocked = progress.map(p => p.lesson_title); setUnlockedLessons(...)
+                // So the DB stores UNLOCKED lesson titles? Or completed ones?
+                // Usually progress stores "completed: lesson X". And UI unlocks "X+1".
+                // But init logic uses the list directly as unlocked list.
+                // So if I complete Lesson 1, I should insert Lesson 2 into DB so it appears in unlocked list.
+                // Yes, let's insert the *next* lesson title if it exists.
+                lesson_title: nextLessonTitle || 'COMPLETED_ALL' 
+            });
+            
+            if (error) throw error;
+            
+            // Sync Profile XP
+            await supabase.from('profiles').update({ xp: newXp, level: newLevel }).eq('id', userId);
+            
+            alert(`✨ أحسنت! أكملت الدرس "${activeLesson.lessonTitle}" وحصلت على 50 نقطة!`);
+            setViewMode('map');
+            setActiveLesson(null);
+            setCurrentSlide(0);
+        } catch (e) {
+            console.error("Error saving progress:", e);
+            alert("حدث خطأ في حفظ تقدمك، لكن لا تقلق، نقاطك محفوظة محلياً.");
+            setViewMode('map');
+        }
+    };
+
     // --- Lesson Player Renderer ---
     const renderLessonPlayer = () => {
         if (!activeLesson) return null;
+        const totalSlides = 5; 
 
         return (
             <div className="w-full h-full flex flex-col bg-slate-900/90 backdrop-blur-xl relative z-20">
@@ -170,7 +440,7 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
                 <div className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-slate-900/50">
                     <div className="flex items-center gap-4">
                         <button 
-                            onClick={() => setViewMode('map')}
+                            onClick={() => { setViewMode('map'); setCurrentSlide(0); }}
                             className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
                         >
                             <ChevronRight size={20} />
@@ -188,26 +458,25 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
                     </div>
                 </div>
 
-                {/* Player Content (Placeholder for Slides) */}
+                {/* Player Content */}
                 <div className="flex-1 overflow-y-auto p-8 custom-scrollbar relative">
-                    {/* Content Container */}
                     <div className="max-w-4xl mx-auto space-y-8">
                         
-                        {/* Slide/Content Area */}
+                        {/* Slide Area */}
                         <div className="aspect-video bg-black rounded-2xl border border-slate-700 overflow-hidden relative group shadow-2xl">
                              <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500">
                                 <PlayCircle size={64} className="mb-4 opacity-50 group-hover:scale-110 transition-transform duration-500 text-amber-500" />
                                 <p className="text-lg font-bold">محتوى الدرس التفاعلي</p>
-                                <p className="text-sm opacity-60 mt-2">شريحة 1 من 5</p>
+                                <p className="text-sm opacity-60 mt-2">شريحة {currentSlide + 1} من {totalSlides}</p>
                              </div>
                              
                              {/* Progress Bar */}
                              <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-800">
-                                <div className="h-full w-[20%] bg-amber-500"></div>
+                                <div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${((currentSlide + 1) / totalSlides) * 100}%` }}></div>
                              </div>
                         </div>
 
-                        {/* Text Content / Objectives */}
+                        {/* Content based on slide (Mock) */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
                                 <h3 className="text-amber-400 font-bold mb-4 flex items-center gap-2">
@@ -228,8 +497,8 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
                                     <Zap size={18} /> الأنشطة المطلوبة
                                 </h3>
                                 <ul className="space-y-3">
-                                    {activeLesson.activities.map((act, i) => (
-                                        <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                                    {activeLesson.activities.slice(0, currentSlide + 1).map((act, i) => (
+                                        <li key={i} className="flex items-start gap-2 text-sm text-slate-300 animate-in fade-in slide-in-from-right-4">
                                             <div className="w-5 h-5 rounded flex items-center justify-center bg-cyan-500/20 text-cyan-400 text-[10px] font-bold shrink-0">
                                                 {i + 1}
                                             </div>
@@ -243,15 +512,32 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
                     </div>
                 </div>
 
-                {/* Player Footer Controls */}
+                {/* Footer Controls */}
                 <div className="h-20 border-t border-white/10 bg-slate-900/80 backdrop-blur flex items-center justify-center gap-4">
-                    <button className="px-6 py-3 rounded-xl bg-slate-800 text-slate-400 font-bold hover:bg-slate-700 transition-colors disabled:opacity-50">
+                    <button 
+                        onClick={() => setCurrentSlide(Math.max(0, currentSlide - 1))}
+                        disabled={currentSlide === 0}
+                        className="px-6 py-3 rounded-xl bg-slate-800 text-slate-400 font-bold hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
                         السابق
                     </button>
-                    <span className="font-mono text-slate-500 mx-4">1 / 5</span>
-                    <button className="px-6 py-3 rounded-xl bg-amber-600 text-white font-bold hover:bg-amber-500 transition-colors shadow-lg shadow-amber-500/20">
-                        التالي
-                    </button>
+                    <span className="font-mono text-slate-500 mx-4">{currentSlide + 1} / {totalSlides}</span>
+                    
+                    {currentSlide < totalSlides - 1 ? (
+                        <button 
+                            onClick={() => setCurrentSlide(currentSlide + 1)}
+                            className="px-6 py-3 rounded-xl bg-amber-600 text-white font-bold hover:bg-amber-500 transition-colors shadow-lg shadow-amber-500/20"
+                        >
+                            التالي
+                        </button>
+                    ) : (
+                        <button 
+                            onClick={handleLessonCompletion}
+                            className="px-6 py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-500/20 flex items-center gap-2"
+                        >
+                            <CheckCircle size={18} /> إنهاء الدرس
+                        </button>
+                    )}
                 </div>
             </div>
         );
@@ -446,7 +732,7 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
             { name: "أنت (محمد)", points: 840, badge: "silver" },
             { name: "ليلى الورد", points: 720, badge: "bronze" },
         ];
-
+        
         return (
             <div className="max-w-2xl mx-auto p-6 overflow-y-auto h-full custom-scrollbar">
                 <div className="text-center mb-8">
@@ -498,6 +784,7 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
             
             {/* --- THEME BACKGROUND (Oasis) --- */}
             <div className="absolute inset-0 pointer-events-none z-0">
+                {renderActiveTask()}
                 {renderAdminOverlay()}
                 {/* Sky Gradient */}
                 <div className="absolute inset-0 bg-gradient-to-b from-sky-900 via-sky-950 to-slate-950" />
@@ -572,9 +859,22 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
                     )}
                 </div>
 
-                <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1.5 rounded-full border border-white/5">
-                    <Crown size={14} className="text-yellow-400" />
-                    <span className="font-mono font-bold text-yellow-100 text-xs">840 XP</span>
+                <div className="flex items-center gap-3">
+                    {/* Notifications (New Tasks) */}
+                    <button 
+                        onClick={() => { if (oasisTasks.length > 0) setActiveTask(oasisTasks[0]); }}
+                        className="relative p-2 rounded-xl bg-slate-800/50 text-slate-300 hover:text-white transition-colors"
+                    >
+                        <Bell size={20} />
+                        {oasisTasks.length > 0 && (
+                            <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full animate-bounce" />
+                        )}
+                    </button>
+
+                    <div className="flex items-center gap-2 bg-slate-800/50 px-3 py-1.5 rounded-full border border-white/5">
+                        <Crown size={14} className="text-yellow-400" />
+                        <span className="font-mono font-bold text-yellow-100 text-xs">{xp} XP</span>
+                    </div>
                 </div>
             </div>
 

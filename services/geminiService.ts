@@ -1,4 +1,5 @@
 
+/// <reference types="vite/client" />
 import { GoogleGenAI, Type, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { SYSTEM_PROMPT, LESSON_PLAN_SCHEMA, GAME_SCHEMA, CURRICULUM_AGENT_PROMPT, CURRICULUM_SCHEMA } from "../constants";
 import { LessonPlan, SlideContent, GameScenario, SongItem, StoryItem, QuizQuestion, Flashcard, PodcastScript, InfographicSection, VideoScriptScene, TokenUsageRecord, CurriculumBook } from "../types";
@@ -861,6 +862,9 @@ export const analyzeCurriculum = async (
 
         // Map the response to our typed interface
         const result: CurriculumBook = {
+            id: Date.now().toString(),
+            analyzedAt: new Date().toISOString(),
+            fileName: 'Uploaded Book', // Default or placeholder
             bookMetadata: {
                 subject: parsed.book_metadata?.subject || 'غير محدد',
                 grade: parsed.book_metadata?.grade || 'غير محدد',

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Scroll, Sparkles, Send, BookOpen, Feather, History, ArrowRight } from 'lucide-react';
 import * as geminiService from '../services/geminiService';
+import { createResource } from '../services/syncService';
 import { StoryItem } from '../types';
 
 interface StoryWeaverProps {
@@ -46,6 +47,22 @@ export const StoryWeaver: React.FC<StoryWeaverProps> = ({ onBack }) => {
             console.error(error);
         } finally {
             setIsGenerating(false);
+        }
+    };
+
+    const handleSaveStory = async () => {
+        if (!generatedStory) return;
+        try {
+            await createResource({
+                title: generatedStory.title,
+                type: 'story',
+                tags: [grade, 'heritage', 'mystery'],
+                data: generatedStory
+            });
+            alert('تم حفظ الحكاية في المصادر بنجاح!');
+        } catch (error) {
+            console.error(error);
+            alert('حدث خطأ أثناء الحفظ.');
         }
     };
 
@@ -163,8 +180,11 @@ export const StoryWeaver: React.FC<StoryWeaverProps> = ({ onBack }) => {
                             </button>
 
                             <div className="flex gap-3">
-                                <button className="bg-amber-100 hover:bg-amber-200 text-amber-900 px-6 py-2 rounded-full font-bold transition-colors text-sm">
-                                    حفظ في الخزانة
+                                <button
+                                    onClick={handleSaveStory}
+                                    className="bg-amber-100 hover:bg-amber-200 text-amber-900 px-6 py-2 rounded-full font-bold transition-colors text-sm"
+                                >
+                                    حفظ في المصادر
                                 </button>
                                 <button className="bg-amber-800 hover:bg-amber-900 text-[#f3eacb] px-6 py-2 rounded-full font-bold transition-colors flex items-center gap-2">
                                     <Send size={16} />

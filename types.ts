@@ -284,6 +284,7 @@ export interface ClassRoom {
     name: string; // e.g. "الصف الثاني - فصل أ"
     gradeLevel: string;
     subject?: string;
+    classCode?: string; // Added Class Code
     students: Student[];
     studentGroupId?: string; // Link to the original group if applicable
     announcements: Announcement[];
@@ -303,13 +304,14 @@ export interface LearningUnit {
 export interface Resource {
     id: string;
     title: string;
-    type: 'pdf' | 'image' | 'video' | 'link' | 'template' | 'lesson-plan' | 'song';
+    type: 'pdf' | 'image' | 'video' | 'link' | 'template' | 'lesson-plan' | 'song' | 'game' | 'story' | 'simulation';
     url?: string;
     tags: string[];
+    content?: any; // Flexible content field for song/story/game data
     classId?: string;
     unitId?: string;
     createdAt: string;
-    data?: LessonPlan;
+    data?: LessonPlan | SongItem | StoryItem | any;
 }
 
 // Private Vault Types
@@ -331,7 +333,7 @@ export interface StudentWork {
     notes: string;
 }
 
-export type AppView = 'welcome' | 'login-teacher' | 'login-student' | 'dashboard' | 'create-lesson' | 'view-lesson' | 'gamification' | 'simulation' | 'songs' | 'profile' | 'calendar' | 'class-manager' | 'story-weaver' | 'melody-studio' | 'private-vault' | 'curriculum-agent' | 'student-oasis';
+export type AppView = 'welcome' | 'login-teacher' | 'login-student' | 'dashboard' | 'create-lesson' | 'view-lesson' | 'gamification' | 'simulation' | 'songs' | 'profile' | 'calendar' | 'class-manager' | 'story-weaver' | 'melody-studio' | 'private-vault' | 'curriculum-agent' | 'student-oasis' | 'oasis-command-center';
 
 // Curriculum Agent Types (منهاجي)
 export interface KeyVisual {

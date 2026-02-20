@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowRight, Archive, BookHeart, Trophy, Plus, Trash2, FileText, Music, BookOpen, Image, Video, Type, Search, CalendarDays, Smile, Frown, Zap, Meh, X, Upload, ChevronDown, Sparkles, Lock } from 'lucide-react';
 import { JournalEntry, StudentWork, Resource } from '../types';
+import { fetchVaultEntries, saveVaultEntry, fetchResourcesByType, deleteResource } from '../services/syncService';
+import { supabase } from '../services/supabaseClient';
 
 interface PrivateVaultProps {
     onBack: () => void;
@@ -19,9 +21,6 @@ const TABS = [
     { id: 'journal' as const, label: 'مذكراتي', icon: BookHeart },
     { id: 'gallery' as const, label: 'لوحة الشرف', icon: Trophy },
 ];
-
-const LS_JOURNAL = 'st_private_journal';
-const LS_GALLERY = 'st_student_gallery';
 
 export const PrivateVault: React.FC<PrivateVaultProps> = ({ onBack }) => {
     const [activeTab, setActiveTab] = useState<'archive' | 'journal' | 'gallery'>('archive');
@@ -48,22 +47,58 @@ export const PrivateVault: React.FC<PrivateVaultProps> = ({ onBack }) => {
     const [galleryFileType, setGalleryFileType] = useState<'image' | 'video' | 'text'>('image');
     const galleryFileRef = useRef<HTMLInputElement>(null);
 
-    // Load data from localStorage
+    // Load data from Supabase
     useEffect(() => {
-        try {
-            const storedResources = localStorage.getItem('st_resources');
-            if (storedResources) setResources(JSON.parse(storedResources));
-        } catch (e) { console.error(e); }
+        const loadVault = async () => {
+             // 1. Resources (Archive)
+             try {
+                 const res = await fetchResourcesByType();
+                 if(res) setResources(res);
+             } catch(e) { console.error("Error loading resources", e); }
 
-        try {
-            const storedJournal = localStorage.getItem(LS_JOURNAL);
-            if (storedJournal) setJournalEntries(JSON.parse(storedJournal));
-        } catch (e) { console.error(e); }
+             // 2. Vault Entries
+             try {
+                 const entries = await fetchVaultEntries();
+                 if (entries) {
+                     const journals: JournalEntry[] = [];
+                     const works: StudentWork[] = [];
 
-        try {
-            const storedGallery = localStorage.getItem(LS_GALLERY);
-            if (storedGallery) setStudentWorks(JSON.parse(storedGallery));
-        } catch (e) { console.error(e); }
+                     entries.forEach((e: any) => {
+                         if (e.type === 'journal') {
+                             journals.push({
+                                 id: e.id,
+                                 date: e.created_at, // Postgres timestamp
+                                 mood: e.mood,
+                                 content: e.content,
+                                 tags: e.tags || []
+                             });
+                         } else if (e.type === 'student_work') {
+                             let parsed = { studentName: '', notes: '', subType: 'image' };
+                             try {
+                                parsed = JSON.parse(e.content);
+                             } catch {
+                                parsed = { studentName: 'Unknown', notes: e.content, subType: 'image' };
+                             }
+
+                             works.push({
+                                 id: e.id,
+                                 studentName: parsed.studentName,
+                                 title: e.title,
+                                 type: (parsed.subType || 'image') as any, 
+                                 url: e.media_url,
+                                 date: e.created_at,
+                                 notes: parsed.notes
+                             });
+                         }
+                     });
+                     
+                     // Sort by date desc
+                     setJournalEntries(journals.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+                     setStudentWorks(works.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+                 }
+             } catch (e) { console.error("Error loading vault", e); }
+        };
+        loadVault();
     }, []);
 
     // --- ARCHIVE LOGIC ---
@@ -81,34 +116,52 @@ export const PrivateVault: React.FC<PrivateVaultProps> = ({ onBack }) => {
         }
     };
 
-    const handleDeleteResource = (id: string) => {
-        const updated = resources.filter(r => r.id !== id);
-        setResources(updated);
-        localStorage.setItem('st_resources', JSON.stringify(updated));
+    const handleDeleteResource = async (id: string) => {
+        if(!window.confirm('حذف هذا المورد من الأرشيف؟')) return;
+        try {
+            await deleteResource(id);
+            setResources(resources.filter(r => r.id !== id));
+        } catch(e) {
+            console.error("Error deleting resource", e);
+            alert('حدث خطأ أثناء الحذف');
+        }
     };
 
     // --- JOURNAL LOGIC ---
-    const handleSaveJournal = () => {
+    const handleSaveJournal = async () => {
         if (!journalContent.trim()) return;
-        const entry: JournalEntry = {
-            id: Date.now().toString(),
-            date: new Date().toISOString(),
-            mood: journalMood,
-            content: journalContent.trim(),
-            tags: journalTags.split(',').map(t => t.trim()).filter(Boolean),
-        };
-        const updated = [entry, ...journalEntries];
-        setJournalEntries(updated);
-        localStorage.setItem(LS_JOURNAL, JSON.stringify(updated));
-        setJournalContent('');
-        setJournalTags('');
-        setShowJournalForm(false);
+        try {
+            const result = await saveVaultEntry({
+                date: new Date(),
+                mood: journalMood,
+                content: journalContent.trim(), // content = content
+                tags: journalTags.split(',').map(t => t.trim()).filter(Boolean)
+            }, 'journal');
+
+            const entry: JournalEntry = {
+                id: result.id,
+                date: result.created_at,
+                mood: result.mood,
+                content: result.content,
+                tags: result.tags || [],
+            };
+            setJournalEntries([entry, ...journalEntries]);
+            setJournalContent('');
+            setJournalTags('');
+            setShowJournalForm(false);
+        } catch (e) { console.error('Error saving journal', e); }
     };
 
-    const handleDeleteJournal = (id: string) => {
-        const updated = journalEntries.filter(e => e.id !== id);
-        setJournalEntries(updated);
-        localStorage.setItem(LS_JOURNAL, JSON.stringify(updated));
+    const handleDeleteJournal = async (id: string) => {
+        if(!window.confirm('حذف هذا الإدخال؟')) return;
+        // Ideally call deleteVaultEntry(id), need to add it to service
+        // For now just local update + fire and forget delete call if available
+        // Need to add delete method to syncService first if strict.
+        // Assuming delete functionality is paramount:
+        const { error } = await supabase.from('private_vault_entries').delete().eq('id', id);
+        if(!error) {
+            setJournalEntries(journalEntries.filter(e => e.id !== id));
+        }
     };
 
     // --- GALLERY LOGIC ---
@@ -131,31 +184,46 @@ export const PrivateVault: React.FC<PrivateVaultProps> = ({ onBack }) => {
         reader.readAsDataURL(file);
     };
 
-    const handleSaveStudentWork = () => {
+    const handleSaveStudentWork = async () => {
         if (!galleryStudentName.trim() || !galleryTitle.trim() || !galleryFilePreview) return;
-        const work: StudentWork = {
-            id: Date.now().toString(),
-            studentName: galleryStudentName.trim(),
-            title: galleryTitle.trim(),
-            type: galleryFileType,
-            url: galleryFilePreview,
-            date: new Date().toISOString(),
-            notes: galleryNotes.trim(),
-        };
-        const updated = [work, ...studentWorks];
-        setStudentWorks(updated);
-        localStorage.setItem(LS_GALLERY, JSON.stringify(updated));
-        setGalleryStudentName('');
-        setGalleryTitle('');
-        setGalleryNotes('');
-        setGalleryFilePreview(null);
-        setShowGalleryForm(false);
+        
+        try {
+            const entry = await saveVaultEntry({
+                studentName: galleryStudentName.trim(),
+                title: galleryTitle.trim(),
+                url: galleryFilePreview,
+                date: new Date(),
+                notes: galleryNotes.trim(),
+                subType: galleryFileType
+            }, 'student_work');
+            
+            let parsed = { studentName: '', notes: '', subType: galleryFileType };
+            try { parsed = JSON.parse(entry.content); } catch {}
+            
+            const work: StudentWork = {
+                id: entry.id,
+                studentName: parsed.studentName,
+                title: entry.title,
+                type: (parsed.subType || 'image') as any,
+                url: entry.media_url,
+                date: entry.created_at,
+                notes: parsed.notes,
+            };
+            setStudentWorks([work, ...studentWorks]);
+            setGalleryStudentName('');
+            setGalleryTitle('');
+            setGalleryNotes('');
+            setGalleryFilePreview(null);
+            setShowGalleryForm(false);
+        } catch(e) { console.error(e); }
     };
 
-    const handleDeleteWork = (id: string) => {
-        const updated = studentWorks.filter(w => w.id !== id);
-        setStudentWorks(updated);
-        localStorage.setItem(LS_GALLERY, JSON.stringify(updated));
+    const handleDeleteWork = async (id: string) => {
+        if(!window.confirm('هل أنت متأكد من حذف هذا العمل؟')) return;
+        const { error } = await supabase.from('private_vault_entries').delete().eq('id', id);
+        if(!error) {
+           setStudentWorks(studentWorks.filter(w => w.id !== id));
+        }
     };
 
     const formatDate = (iso: string) => {
