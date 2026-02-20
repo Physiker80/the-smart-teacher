@@ -48,7 +48,16 @@ const trackUsage = (modelName: string, usage: any) => {
 };
 
 // Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// In Vite, use import.meta.env.VITE_GEMINI_API_KEY
+// In Vercel, it might also be process.env.VITE_GEMINI_API_KEY if configured that way
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' ? process.env.API_KEY : undefined);
+
+// Only initialize if key exists to prevent crashing immediately
+const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key-for-build' }); 
+
+if (!apiKey) {
+    console.warn("⚠️ API Key is missing! AI features will not work.");
+}
 
 /**
  * Smart Algorithm to distribute exactly 40 minutes across slides based on content interaction type.

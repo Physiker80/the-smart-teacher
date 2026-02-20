@@ -9,7 +9,9 @@ import {
 } from 'lucide-react';
 
 // Initialize Gemini for "Little Aleem"
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Safely handle API Key for client-side usage
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' ? process.env.API_KEY : undefined);
+const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key-for-build' });
 
 // --- Types ---
 interface StudentOasisProps {
