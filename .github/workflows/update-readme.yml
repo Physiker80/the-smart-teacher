@@ -1,0 +1,38 @@
+name: Update README
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Get Last Commit Date
+      id: date
+      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+
+    - name: Update README with Timestamp
+      uses: fjogeleit/yaml-update-action@main
+      with:
+        valueFile: 'README.md'
+        # This is a hacky way to replace text using sed since yaml-update is for yaml
+        # Instead, let's just use shell commands directly
+        
+    - name: Replace Placeholder in README
+      run: |
+        sed -i "s|<!-- LAST_UPDATED -->.*|<!-- LAST_UPDATED -->\n*Last Updated: ${{ steps.date.outputs.date }}*|" README.md
+    
+    - name: Commit and Push
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add README.md
+        # Only commit if there are changes
+        git diff --quiet && git diff --staged --quiet || (git commit -m "docs: auto-update last updated timestamp" && git push)
