@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>المعلم الذكي - مساعد المعلم السوري</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&family=Amiri:wght@400;700&family=Rakkas&display=swap"
+    rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Tajawal', 'sans-serif'],
+            amiri: ['Amiri', 'serif'],
+            rakkas: ['Rakkas', 'serif'],
+          },
+          colors: {
+            primary: {
+              50: 'var(--color-primary-50)',
+              100: 'var(--color-primary-100)',
+              400: 'var(--color-primary-400)',
+              500: 'var(--color-primary-500)',
+              600: 'var(--color-primary-600)',
+              800: 'var(--color-primary-800)',
+              900: 'var(--color-primary-900)',
+            },
+            secondary: {
+              400: '#facc15',
+              500: '#eab308', // Gold/Yellow
+              600: '#ca8a04',
+            },
+            accent: {
+              blue: '#3b82f6',
+              green: '#86efac',
+              purple: '#a855f7'
+            }
+          },
+          borderRadius: {
+            '4xl': '2.5rem',
+          }
+        },
+      },
+    }
+  </script>
+  <style>
+    body {
+      font-family: 'Tajawal', sans-serif;
+      background-color: var(--bg-main);
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+  </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.41.0",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "html2pdf.js": "https://esm.sh/html2pdf.js@0.10.1",
+    "docx": "https://esm.sh/docx@8.5.0",
+    "file-saver": "https://esm.sh/file-saver@2.0.5",
+    "pptxgenjs": "https://esm.sh/pptxgenjs@3.12.0"
+  }
+}
+</script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
+</html>
