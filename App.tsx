@@ -31,7 +31,7 @@ const App: React.FC = () => {
     const [selectedPlan, setSelectedPlan] = useState<LessonPlan | null>(null);
     const [calendarInitialEvent, setCalendarInitialEvent] = useState<{ title: string; subject?: string; grade?: string; planId?: string } | undefined>(undefined);
     const [currentTheme, setCurrentTheme] = useState<Theme>('default');
-    const [lessonGenProps, setLessonGenProps] = useState<{ initialTopic?: string; initialGrade?: string; initialActivities?: string[] }>({});
+    const [lessonGenProps, setLessonGenProps] = useState<{ initialTopic?: string; initialGrade?: string; initialActivities?: string[]; initialSubject?: string }>({});
 
     // Check active session on mount
     useEffect(() => {
@@ -372,6 +372,7 @@ const App: React.FC = () => {
                         initialTopic={lessonGenProps.initialTopic}
                         initialGrade={lessonGenProps.initialGrade}
                         initialActivities={lessonGenProps.initialActivities}
+                        initialSubject={lessonGenProps.initialSubject}
                     />
                 );
             case 'view-lesson':
@@ -458,6 +459,10 @@ const App: React.FC = () => {
                             setSelectedPlan(plan);
                             setCurrentView('view-lesson');
                         }}
+                        onGenerateLesson={(topic, grade, activities, subject) => {
+                            setLessonGenProps({ initialTopic: topic, initialGrade: grade, initialActivities: activities, initialSubject: subject });
+                            setCurrentView('create-lesson');
+                        }}
                     />
                 );
             case 'private-vault':
@@ -465,9 +470,10 @@ const App: React.FC = () => {
             case 'curriculum-agent':
                 return (
                     <CurriculumAgent 
+                        userId={user?.id}
                         onBack={() => setCurrentView('dashboard')} 
-                        onGenerateLesson={(topic, grade, activities) => {
-                            setLessonGenProps({ initialTopic: topic, initialGrade: grade, initialActivities: activities });
+                        onGenerateLesson={(topic, grade, activities, subject) => {
+                            setLessonGenProps({ initialTopic: topic, initialGrade: grade, initialActivities: activities, initialSubject: subject });
                             setCurrentView('create-lesson');
                         }}
                     />

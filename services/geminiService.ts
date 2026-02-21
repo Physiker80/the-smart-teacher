@@ -359,12 +359,25 @@ export const generateGame = async (topic: string, gradeLevel: string, theme: str
 };
 
 export const generateSlideImage = async (description: string): Promise<string | null> => {
+    const safeDesc = (description || '').trim();
+    if (!safeDesc) return "/fallback-slide.svg";
+
+    // 1. PRIMARY: Pollinations.ai (Free, no API key, works reliably)
     try {
-        // 1. Try Nano Banana (Gemini 2.5 Flash Image) - Faster & Specialized
-        try {
+        const promptText = safeDesc.length > 400 ? safeDesc.substring(0, 400) : safeDesc;
+        const fullPrompt = `${promptText}. 3D Disney Pixar style, cute characters, bright colors, educational illustration`;
+        const encoded = encodeURIComponent(fullPrompt);
+        const seed = Math.floor(Math.random() * 1000000);
+        return `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=576&seed=${seed}&nologo=true&model=flux`;
+    } catch (e1) {
+        console.warn("Pollinations failed:", e1);
+    }
+
+    // 2. FALLBACK: Gemini (requires API key with image gen access)
+    try {
             // Enhance prompt for Nano Banana (Gemini 2.5 Flash Image)
             // It prefers concise, descriptive prompts for best results.
-            const enhancedPrompt = description.length > 800 ? description.substring(0, 800) : description;
+            const enhancedPrompt = safeDesc.length > 800 ? safeDesc.substring(0, 800) : safeDesc;
             const finalPrompt = `High quality, 3D Pixar style illustration. ${enhancedPrompt}. Bright colors, soft lighting, cute characters, educational context, detailed, 8k resolution.`;
 
             const response = await ai.models.generateContent({
@@ -374,31 +387,13 @@ export const generateSlideImage = async (description: string): Promise<string | 
                 }
             });
 
-            if (response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data) {
-                return `data:image/png;base64,${response.candidates[0].content.parts[0].inlineData.data}`;
-            }
-        } catch (apiError: any) {
-            console.warn("Nano Banana (Gemini 2.5 Flash Image) Failed, switching to fallback:", apiError.message);
-            // Continue to fallback...
-        }
-
-        // 2. Fallback: Pollinations.ai (Free, High Quality, No Key)
-        // We use a seed to make it deterministic if needed, or random for variety.
-
-        // Truncate description to ensure stability (max ~250 chars for English)
-        const safeDescription = description.length > 250 ? description.substring(0, 250) : description;
-        const encodedPrompt = encodeURIComponent(safeDescription + " 3D Disney Pixar style, cute, bright colors, high quality");
-        const randomSeed = Math.floor(Math.random() * 1000000);
-        const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=576&seed=${randomSeed}&nologo=true&model=flux`;
-
-        // We return the URL directly. The <img> tag will handle loading it.
-        return imageUrl;
-
-    } catch (error) {
-        console.error("All Image Gen methods failed:", error);
-        // Return a safe placeholder if everything fails
-        return "/fallback-slide.svg";
+            const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            if (data) return `data:image/png;base64,${data}`;
+    } catch (apiError: any) {
+        console.warn("Gemini image gen failed:", apiError.message);
     }
+
+    return "/fallback-slide.svg";
 };
 
 export const generateSongOrStory = async (topic: string, type: 'song' | 'story', grade: string, fileData?: { mimeType: string, data: string }): Promise<SongItem | StoryItem> => {
@@ -640,21 +635,32 @@ export const generatePodcastScript = async (topic: string, grade: string): Promi
 export const generateInfographic = async (topic: string, grade: string): Promise<InfographicSection[]> => {
     try {
         const prompt = `
-        Create content for a vertical infographic about "${topic}" for "${grade}".
-        Return ONLY a JSON array of sections (4-5 sections).
-        Each object:
-        {
-          "title": "Section Header (Arabic)",
-          "content": "Brief impact bullet points or summary (Arabic)",
-          "icon": "Name of a Lucide icon that fits (e.g. 'Zap', 'Book', 'Globe', 'Cpu', 'Users')",
-          "color": "Tailwind color class for background (e.g. 'bg-blue-500', 'bg-emerald-500', 'bg-amber-500')"
-        }
+أنت مصمم انفوجرافيك عبقري يعمل عبر أسلوب "نانو بانانا" 🍌 — منهجية إبداعية تُظهر عظمة أي درس وتُشوّق الأطفال.
+المطلوب: صمم محتوى Presenter Slides (شرائح عرض) مبدعة كرسومات ديزني وبيكسار — كل قسم صورة ملهمة + نص.
+
+الدرس: "${topic}"
+الصف: "${grade}"
+
+كل قسم = شريحة عرض (Slide) بـ:
+1. عنوان مشوق بالعربية للأطفال
+2. محتوى مختصر بلغة طفولية مبهرة
+3. visualDescription بالإنكليزية حصراً — وصف تفصيلي لصورة بتقنية 3D Disney/Pixar: مشهد سينمائي، شخصيات لطيفة، ألوان زاهية، إضاءة دافئة، يُبهِر الطفل ويُشوّقه. اكتب جملة واحدة واضحة للإيمج جنريشن.
+
+أرجع فقط مصفوفة JSON من 4-5 أقسام بدون أي نص إضافي.
+كل عنصر:
+{
+  "title": "عنوان القسم بالعربية — مشوق وجذاب للأطفال",
+  "content": "محتوى مختصر بلغة طفولية تعكس روعة الدرس",
+  "icon": "Zap أو Book أو Globe أو Sparkles أو Lightbulb",
+  "color": "bg-blue-500 أو bg-emerald-500 أو bg-amber-500 أو bg-violet-500 أو bg-rose-500",
+  "visualDescription": "Detailed English prompt for 3D Disney Pixar style illustration: cute characters, bright colors, soft lighting, educational scene that amazes children. One clear sentence for AI image generation."
+}
         `;
 
         const response = await ai.models.generateContent({
             model: 'models/gemini-2.5-flash',
             contents: [{ parts: [{ text: prompt }] }],
-            config: { responseMimeType: "application/json", temperature: 0.5 }
+            config: { responseMimeType: "application/json", temperature: 0.75 }
         });
 
         if (response.usageMetadata) trackUsage('gemini-2.5-flash', response.usageMetadata);
@@ -860,15 +866,19 @@ export const analyzeCurriculum = async (
             onThought?.(thoughts[i]);
         }
 
+        const subject = parsed.book_metadata?.subject || 'غير محدد';
+        const grade = parsed.book_metadata?.grade || 'غير محدد';
+        const part = parsed.book_metadata?.part || 'غير محدد';
+
         // Map the response to our typed interface
         const result: CurriculumBook = {
             id: Date.now().toString(),
             analyzedAt: new Date().toISOString(),
-            fileName: 'Uploaded Book', // Default or placeholder
+            fileName: [subject, grade, part].filter((s: string) => s && s !== 'غير محدد').join(' - ') || 'كتاب محلل',
             bookMetadata: {
-                subject: parsed.book_metadata?.subject || 'غير محدد',
-                grade: parsed.book_metadata?.grade || 'غير محدد',
-                part: parsed.book_metadata?.part || 'غير محدد',
+                subject,
+                grade,
+                part,
                 totalPages: parsed.book_metadata?.totalPages
             },
             liveThoughts: thoughts,
@@ -896,4 +906,38 @@ export const analyzeCurriculum = async (
         onThought?.("❌ حدث خطأ أثناء التحليل: " + (error instanceof Error ? error.message : 'خطأ غير معروف'));
         throw error;
     }
+};
+
+/**
+ * استخراج النص من صورة باستخدام Gemini Vision (بديل OCR أدق من Tesseract)
+ * يدعم العربية والإنجليزية والصفحات الممسوحة ضوئياً.
+ */
+export const extractTextFromImage = async (imageData: { mimeType: string; data: string }): Promise<string> => {
+    const prompt = `أنت متخصص في استخراج النص من الصور والمستندات الممسوحة ضوئياً.
+المطلوب: استخرج كل النص الموجود في الصورة بدقة، مع الحفاظ على الترتيب والبنية.
+- اقرأ النص العربي والإنجليزي كما هو مكتوب.
+- لا تخترع نصوصاً غير موجودة.
+- إذا كانت هناك عناوين أو فقرات، احتفظ بالتنظيم.
+- أعد النص الناتج فقط بدون تعليقات إضافية.`;
+
+    const response = await ai.models.generateContent({
+        model: 'models/gemini-2.5-flash',
+        contents: {
+            parts: [
+                { text: prompt },
+                {
+                    inlineData: {
+                        mimeType: imageData.mimeType,
+                        data: imageData.data,
+                    },
+                },
+            ],
+        },
+        config: { temperature: 0.1 },
+    });
+
+    if (response.usageMetadata) trackUsage('gemini-2.5-flash (OCR)', response.usageMetadata);
+
+    const text = response.text?.trim() || '';
+    return text;
 };

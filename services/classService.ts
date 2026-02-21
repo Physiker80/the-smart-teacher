@@ -57,7 +57,7 @@ export const fetchTeacherClasses = async (teacherId: string): Promise<ClassRoom[
                 grades,
                 participation_count,
                 student_id,
-                profiles:student_id (id, full_name, avatar_url, learning_style, dob, parent_contact)
+                profiles:student_id (id, full_name, learning_style, dob, parent_contact)
             `)
             .in('class_id', classIds);
 

@@ -1,8 +1,11 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { CurriculumBook, CurriculumLesson, KeyVisual, StudentGroup } from '../types';
+import { CurriculumBook, CurriculumLesson, KeyVisual, ClassRoom, getCurriculumBookDisplayName } from '../types';
 import { analyzeCurriculum } from '../services/geminiService';
-import { fetchCurriculumBooks, saveCurriculumBook, deleteCurriculumBook, fetchStudentGroups } from '../services/syncService';
+import { fetchCurriculumBooks, saveCurriculumBook, deleteCurriculumBook } from '../services/syncService';
+import { exportLessonToPDF } from '../services/curriculumPdfService';
+import { fetchTeacherClasses } from '../services/classService';
+import { supabase } from '../services/supabaseClient';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import {
@@ -21,13 +24,14 @@ const MATERIAL_CONFIG: Record<string, { label: string; bg: string; border: strin
 };
 
 interface CurriculumAgentProps {
+    userId?: string;
     onBack: () => void;
-    onGenerateLesson?: (topic: string, grade: string, activities?: string[]) => void;
+    onGenerateLesson?: (topic: string, grade: string, activities?: string[], subject?: string) => void;
 }
 
 // ... existing code ...
 
-export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ onBack, onGenerateLesson }) => {
+export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ userId, onBack, onGenerateLesson }) => {
     const [file, setFile] = useState<{ name: string; size: number; mimeType: string; data: string } | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [thoughts, setThoughts] = useState<string[]>([]);
@@ -36,7 +40,7 @@ export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ onBack, onGene
     const [error, setError] = useState<string | null>(null);
     const [expandedLesson, setExpandedLesson] = useState<number | null>(null);
     const [activeTab, setActiveTab] = useState<'thoughts' | 'results'>('thoughts');
-    const [availableClasses, setAvailableClasses] = useState<StudentGroup[]>([]);
+    const [availableClasses, setAvailableClasses] = useState<ClassRoom[]>([]);
     const [selectedClassId, setSelectedClassId] = useState<string>('');
     const [selectedActivities, setSelectedActivities] = useState<Record<number, string[]>>({}); // Track selected activities per lesson index
 
@@ -58,20 +62,39 @@ export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ onBack, onGene
         if (result) setActiveTab('results');
     }, [result]);
 
-    // Load history & classes
+    // Load history & curriculum books
     useEffect(() => {
-        const loadData = async () => {
+        const loadBooks = async () => {
             try {
                 const books = await fetchCurriculumBooks();
                 setHistory(books);
-                const groups = await fetchStudentGroups();
-                setAvailableClasses(groups);
             } catch (e) {
-                console.error('Failed to load data', e);
+                console.error('Failed to load curriculum books', e);
             }
         };
-        loadData();
+        loadBooks();
     }, []);
+
+    // Load classes for "ربط بالفصل والشعبة" (same source as فصولي الدراسية - classes table)
+    const loadClasses = useCallback(async () => {
+        const id = userId || (await supabase.auth.getUser()).data?.user?.id;
+        if (!id) return;
+        try {
+            const teacherClasses = await fetchTeacherClasses(id);
+            setAvailableClasses(teacherClasses);
+        } catch (e) {
+            console.error('Failed to load classes', e);
+        }
+    }, [userId]);
+
+    useEffect(() => {
+        loadClasses();
+    }, [loadClasses]);
+
+    // Refetch classes when result is ready (user sees link dropdown) - ensures fresh data
+    useEffect(() => {
+        if (result) loadClasses();
+    }, [result, loadClasses]);
 
     const handleLinkToClass = async (classId: string) => {
         if (!result) return;
@@ -160,18 +183,19 @@ export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ onBack, onGene
     const handleGenerateForLesson = (lesson: CurriculumLesson, index: number) => {
         if (onGenerateLesson) {
              const acts = selectedActivities[index] || lesson.activities;
-             onGenerateLesson(lesson.lessonTitle, result?.bookMetadata.grade || '', acts);
+             onGenerateLesson(lesson.lessonTitle, result?.bookMetadata.grade || '', acts, result?.bookMetadata?.subject);
         } else {
             alert('خاصية توليد الدروس غير متوفرة في هذا الوضع');
         }
     };
 
-    // ... pdf generation ...
-    const handleLessonPDF = (lesson: CurriculumLesson) => {
-        const doc = new jsPDF();
-        // Add font with Arabic support if possible, but for now just English/Basic
-        doc.text(lesson.lessonTitle, 10, 10);
-        doc.save(`${lesson.lessonTitle}.pdf`);
+    const handleLessonPDF = async (lesson: CurriculumLesson) => {
+        try {
+            await exportLessonToPDF(lesson, result?.bookMetadata);
+        } catch (e) {
+            console.error(e);
+            setError('فشل تصدير PDF');
+        }
     };
 
     const handleExportPDF = () => {
@@ -370,9 +394,34 @@ export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ onBack, onGene
                         {/* Activities */}
                         {lesson.activities.length > 0 && (
                             <div>
-                                <div className="flex items-center gap-2 mb-3">
-                                    <FlaskConical size={14} className="text-emerald-400" />
-                                    <h5 className="text-sm font-bold text-emerald-400">الأنشطة والتجارب</h5>
+                                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <FlaskConical size={14} className="text-emerald-400" />
+                                        <h5 className="text-sm font-bold text-emerald-400">الأنشطة والتجارب</h5>
+                                        <span className="text-[10px] text-slate-500">(اختر أنشطة للتوليد أو اترك الكل)</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedActivities({ ...selectedActivities, [index]: [...lesson.activities] });
+                                            }}
+                                            className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/30 font-bold"
+                                        >
+                                            تحديد الكل
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const next = { ...selectedActivities };
+                                                delete next[index];
+                                                setSelectedActivities(next);
+                                            }}
+                                            className="text-[10px] px-2 py-1 rounded-lg bg-slate-700/50 border border-slate-600 text-slate-400 hover:bg-slate-600/50 font-bold"
+                                        >
+                                            إلغاء التحديد
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="space-y-2">
                                     {lesson.activities.map((act, actIndex) => {
@@ -468,8 +517,15 @@ export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ onBack, onGene
                                 <button
                                     onClick={(e) => { e.stopPropagation(); handleGenerateForLesson(lesson, index); }}
                                     className="flex-1 py-3 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-sm shadow-[0_0_15px_rgba(245,158,11,0.3)] flex items-center justify-center gap-2 group"
+                                    title={(() => {
+                                        const acts = selectedActivities[index];
+                                        return acts?.length ? `توليد درس بـ ${acts.length} نشاط محدد` : 'توليد درس بكل الأنشطة';
+                                    })()}
                                 >
                                     <Brain size={16} /> توليد درس ذكي
+                                    <span className="text-[10px] opacity-90">
+                                        ({selectedActivities[index]?.length ? `${selectedActivities[index].length} أنشطة` : 'كل الأنشطة'})
+                                    </span>
                                     <Sparkles size={14} className="group-hover:animate-spin" />
                                 </button>
                             </div>
@@ -631,7 +687,7 @@ export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ onBack, onGene
                                                     <BookOpen size={18} />
                                                 </div>
                                                 <div className="flex-1 overflow-hidden">
-                                                    <h4 className="font-bold text-slate-200 truncate text-sm">{book.fileName}</h4>
+                                                    <h4 className="font-bold text-slate-200 truncate text-sm">{getCurriculumBookDisplayName(book)}</h4>
                                                     <p className="text-[10px] text-slate-500 font-mono mt-0.5">
                                                         {new Date(book.analyzedAt).toLocaleDateString()}
                                                     </p>
@@ -790,7 +846,7 @@ export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ onBack, onGene
                                             {availableClasses.length > 0 ? (
                                                 availableClasses.map(cls => (
                                                     <option key={cls.id} value={cls.id}>
-                                                        {cls.name} {cls.gradeLevel ? `(${cls.gradeLevel})` : ''}
+                                                        {[cls.name, cls.gradeLevel, cls.subject].filter(Boolean).join(' • ')}
                                                     </option>
                                                 ))
                                             ) : (
@@ -808,7 +864,7 @@ export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ onBack, onGene
                                         <h3 className="text-lg font-bold text-slate-200">هيكل المنهج</h3>
                                         <div className="h-[1px] flex-1 bg-gradient-to-l from-transparent via-slate-700 to-transparent mr-4" />
                                     </div>
-                                    <div className="space-y-3">
+                                    <div className="grid grid-cols-1 gap-3">
                                         {result.curriculumStructure.map((lesson, i) => renderLesson(lesson, i))}
                                     </div>
                                 </div>

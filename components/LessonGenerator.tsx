@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { LessonPlan, CurriculumBook, CurriculumLesson } from '../types';
+import { LessonPlan, CurriculumBook, CurriculumLesson, getCurriculumBookDisplayName } from '../types';
 import { generateLessonPlan } from '../services/geminiService';
 import { getAllCurricula } from '../services/curriculumService';
 import { Loader2, Send, X, AlertCircle, Atom, Cpu, GraduationCap, Camera, CameraOff, RotateCcw, Check, Upload, FileText, Image as ImageIcon, Book, FlaskConical } from 'lucide-react';
@@ -10,6 +10,7 @@ interface LessonGeneratorProps {
     initialTopic?: string;
     initialGrade?: string;
     initialActivities?: string[];
+    initialSubject?: string;
 }
 
 interface CapturedImage {
@@ -22,7 +23,7 @@ interface CapturedImage {
 
 type InputMode = 'camera' | 'upload';
 
-export const LessonGenerator: React.FC<LessonGeneratorProps> = ({ onSuccess, onCancel, initialTopic, initialGrade, initialActivities = [] }) => {
+export const LessonGenerator: React.FC<LessonGeneratorProps> = ({ onSuccess, onCancel, initialTopic, initialGrade, initialActivities = [], initialSubject }) => {
     const [topic, setTopic] = useState(initialTopic || '');
     const [gradeLevel, setGradeLevel] = useState(initialGrade || 'الصف الثالث الابتدائي');
     const [selectedActivities, setSelectedActivities] = useState<string[]>(initialActivities);
@@ -191,6 +192,7 @@ export const LessonGenerator: React.FC<LessonGeneratorProps> = ({ onSuccess, onC
                 gradeLevel,
                 capturedImage ? { mimeType: capturedImage.mimeType, data: capturedImage.data } : undefined
             );
+            if (initialSubject) plan.subject = initialSubject;
             onSuccess(plan);
         } catch (error: any) {
             console.error(error);
@@ -261,9 +263,9 @@ export const LessonGenerator: React.FC<LessonGeneratorProps> = ({ onSuccess, onC
                                 onChange={(e) => setSelectedCurriculumId(e.target.value)}
                                 className="w-full bg-slate-950/80 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/50 transition-all font-mono"
                             >
-                                <option value="">-- اختر كتاباً --</option>
-                                {savedCurricula.map(c => (
-                                    <option key={c.id} value={c.id}>{c.fileName} • {c.bookMetadata.grade}</option>
+                                <option key="empty" value="">-- اختر كتاباً --</option>
+                                {savedCurricula.map((c, idx) => (
+                                    <option key={c.id || `curriculum-${idx}`} value={c.id}>{getCurriculumBookDisplayName(c)} • {c.bookMetadata?.grade || ''}</option>
                                 ))}
                             </select>
 

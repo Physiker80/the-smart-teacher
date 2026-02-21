@@ -140,6 +140,21 @@ export const createResource = async (res: Partial<Resource>) => {
   return data;
 };
 
+export const updateResource = async (id: string, updates: Partial<Pick<Resource, 'title' | 'type' | 'url' | 'tags' | 'classId'>> & { data?: any }) => {
+  const { error } = await supabase
+    .from('resources')
+    .update({
+      ...(updates.title !== undefined && { title: updates.title }),
+      ...(updates.type !== undefined && { type: updates.type }),
+      ...(updates.url !== undefined && { url: updates.url }),
+      ...(updates.tags !== undefined && { tags: updates.tags }),
+      ...(updates.classId !== undefined && { class_id: updates.classId }),
+      ...(updates.data !== undefined && { content: updates.data })
+    })
+    .eq('id', id);
+  if (error) throw error;
+};
+
 // --- CURRICULUM BOOKS (Minhaji) ---
 export const fetchCurriculumBooks = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -173,9 +188,11 @@ export const saveCurriculumBook = async (book: Partial<CurriculumBook>) => {
     // Check if exists
     const { data: existing } = await supabase.from('curriculum_books').select('id').eq('id', book.id).single();
 
+    const linkedClassIdVal = (book.linkedClassId && book.linkedClassId.trim()) ? book.linkedClassId : null;
+
     if (existing) {
         const { data, error } = await supabase.from('curriculum_books').update({
-            linked_class_id: book.linkedClassId,
+            linked_class_id: linkedClassIdVal,
             curriculum_structure: book.curriculumStructure
             // usually metadata doesn't change after analysis
         }).eq('id', book.id).select().single();
@@ -195,7 +212,7 @@ export const saveCurriculumBook = async (book: Partial<CurriculumBook>) => {
             file_name: book.fileName,
             book_metadata: book.bookMetadata,
             curriculum_structure: book.curriculumStructure,
-            linked_class_id: book.linkedClassId
+            linked_class_id: linkedClassIdVal
         }).select().single();
         if (error) throw error;
         return data;
@@ -297,8 +314,10 @@ export const fetchLessonPlans = async (classId?: string) => {
         const plan = l.content as LessonPlan;
         return {
             ...plan,
-            id: l.id // Use DB ID
-        };
+            id: l.id,
+            classId: l.class_id,
+            createdAt: l.created_at
+        } as LessonPlan & { classId?: string; createdAt?: string };
     });
 };
 
@@ -319,8 +338,7 @@ export const saveLessonPlan = async (plan: LessonPlan, classId?: string, isPubli
                 subject: plan.subject,
                 grade: plan.grade,
                 content: plan,
-                class_id: classId,
-                is_public: isPublic
+                class_id: classId
             })
             .eq('id', plan.id)
             .select()
@@ -338,8 +356,7 @@ export const saveLessonPlan = async (plan: LessonPlan, classId?: string, isPubli
                 subject: plan.subject,
                 grade: plan.grade,
                 content: plan,
-                class_id: classId,
-                is_public: isPublic
+                class_id: classId
             })
             .select()
             .single();

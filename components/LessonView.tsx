@@ -284,6 +284,30 @@ export const LessonView: React.FC<LessonViewProps> = ({ plan, onBack, onGamifica
             } else if (type === 'infographic') {
                 const data = await generateInfographic(lessonState.topic, lessonState.grade);
                 newAssets.infographic = data;
+                setSmartAssets(newAssets);
+                setLessonState(prev => ({ ...prev, assets: newAssets }));
+                setGeneratingAsset(null);
+                // Generate Disney/Pixar style images for each section in background
+                if (data?.length) {
+                    for (let i = 0; i < data.length; i++) {
+                        const sec = data[i];
+                        if (sec.visualDescription) {
+                            try {
+                                const imgUrl = await generateSlideImage(sec.visualDescription);
+                                if (imgUrl) {
+                                    setSmartAssets(prev => {
+                                        const inf = prev.infographic || [];
+                                        const updated = inf.map((s, j) => j === i ? { ...s, imageUrl: imgUrl } : s);
+                                        return { ...prev, infographic: updated };
+                                    });
+                                }
+                            } catch (e) {
+                                console.warn('Infographic image gen failed for section', i, e);
+                            }
+                        }
+                    }
+                }
+                return;
             } else if (type === 'video') {
                 const data = await generateVideoScript(lessonState.topic, lessonState.grade);
                 newAssets.videoScript = data;
@@ -1358,7 +1382,7 @@ export const LessonView: React.FC<LessonViewProps> = ({ plan, onBack, onGamifica
                                         )}
 
                                         {activeSmartAsset === 'infographic' && smartAssets.infographic && (
-                                            <div className="max-w-xl mx-auto pt-4">
+                                            <div className="max-w-2xl mx-auto pt-4">
                                                 <div className="flex items-center justify-between mb-6">
                                                     <h3 className="text-xl font-bold text-cyan-400 flex items-center gap-2"><PieChart /> إنفوجرافيك الدرس</h3>
                                                     <div className="flex items-center gap-2">
@@ -1382,12 +1406,9 @@ export const LessonView: React.FC<LessonViewProps> = ({ plan, onBack, onGamifica
                                                         </div>
                                                     </div>
 
-                                                    {/* Sections */}
+                                                    {/* Sections - Presenter Slides */}
                                                     <div className="relative px-6 py-8">
-                                                        {/* Vertical Timeline */}
-                                                        <div className="absolute left-[2.75rem] top-8 bottom-8 w-0.5 bg-gradient-to-b from-cyan-400 via-blue-400 to-indigo-400 z-0" />
-
-                                                        <div className="space-y-6">
+                                                        <div className="space-y-8">
                                                             {smartAssets.infographic.map((sec, i) => {
                                                                 const colors = [
                                                                     { bg: 'bg-cyan-500', ring: 'ring-cyan-200', border: 'border-cyan-100', accent: 'text-cyan-600' },
@@ -1399,15 +1420,40 @@ export const LessonView: React.FC<LessonViewProps> = ({ plan, onBack, onGamifica
                                                                 ];
                                                                 const c = colors[i % colors.length];
                                                                 return (
-                                                                    <div key={i} className="flex items-start gap-5 relative z-10">
-                                                                        {/* Number Badge */}
-                                                                        <div className={`w-14 h-14 rounded-xl ${c.bg} ring-4 ${c.ring} flex items-center justify-center text-white font-black text-lg shadow-lg flex-none`}>
-                                                                            {String(i + 1).padStart(2, '0')}
-                                                                        </div>
-                                                                        {/* Content Card */}
-                                                                        <div className={`flex-1 bg-white border-2 ${c.border} rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow`}>
-                                                                            <h4 className={`font-bold text-lg mb-2 ${c.accent}`}>{sec.title}</h4>
-                                                                            <p className="text-slate-600 leading-relaxed text-sm">{sec.content}</p>
+                                                                    <div key={i} className="relative z-10">
+                                                                        {/* Presenter Slide: Image + Content */}
+                                                                        <div className={`overflow-hidden rounded-xl border-2 ${c.border} shadow-lg bg-white`}>
+                                                                            {/* Disney/Pixar Style Image */}
+                                                                            <div className="relative aspect-video w-full bg-gradient-to-br from-slate-100 to-slate-200 overflow-hidden">
+                                                                                {sec.imageUrl ? (
+                                                                                    <img
+                                                                                        src={sec.imageUrl}
+                                                                                        alt={sec.title}
+                                                                                        className="w-full h-full object-cover"
+                                                                                        onError={(e) => {
+                                                                                            const el = e.target as HTMLImageElement;
+                                                                                            if (el.src && !el.src.includes('fallback')) el.src = '/fallback-slide.svg';
+                                                                                        }}
+                                                                                    />
+                                                                                ) : sec.visualDescription ? (
+                                                                                    <div className="absolute inset-0 flex items-center justify-center">
+                                                                                        <Loader2 className="w-10 h-10 text-slate-400 animate-spin" />
+                                                                                        <span className="mr-2 text-sm text-slate-500">جاري رسم الصورة...</span>
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    <div className={`absolute inset-0 flex items-center justify-center ${c.bg} opacity-20`}>
+                                                                                        <Sparkles className="w-16 h-16 text-white opacity-50" />
+                                                                                    </div>
+                                                                                )}
+                                                                                <div className={`absolute top-3 right-3 w-12 h-12 rounded-xl ${c.bg} ring-2 ${c.ring} flex items-center justify-center text-white font-black shadow-lg`}>
+                                                                                    {String(i + 1).padStart(2, '0')}
+                                                                                </div>
+                                                                            </div>
+                                                                            {/* Content */}
+                                                                            <div className="p-5">
+                                                                                <h4 className={`font-bold text-xl mb-2 ${c.accent}`}>{sec.title}</h4>
+                                                                                <p className="text-slate-600 leading-relaxed">{sec.content}</p>
+                                                                            </div>
                                                                         </div>
                                                                     </div>
                                                                 );

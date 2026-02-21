@@ -225,14 +225,18 @@ export const SchoolCalendar: React.FC<SchoolCalendarProps> = ({ onBack, initialE
 
     const handleImageImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const f = e.target.files?.[0]; if (!f) return;
-        setImportToast('جاري تحليل الصورة... ⏳');
+        setImportToast('جاري تحليل الصورة بالذكاء الاصطناعي... ⏳');
         try {
-            // @ts-ignore
-            const Tesseract = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js');
-            const worker = await Tesseract.createWorker('ara+eng');
-            const { data } = await worker.recognize(f);
-            await worker.terminate();
-            const lines = data.text.split('\n').filter((l: string) => l.trim());
+            const { extractTextFromImage } = await import('../services/geminiService');
+            const base64 = await new Promise<string>((resolve, reject) => {
+                const r = new FileReader();
+                r.onload = () => resolve((r.result as string || '').replace(/^data:[^;]+;base64,/, ''));
+                r.onerror = reject;
+                r.readAsDataURL(f);
+            });
+            const mimeType = f.type || 'image/png';
+            const text = await extractTextFromImage({ mimeType, data: base64 });
+            const lines = text.split('\n').filter((l: string) => l.trim());
             const dp = /(\d{4}[-\/]\d{1,2}[-\/]\d{1,2}|\d{1,2}[-\/]\d{1,2}[-\/]\d{4})/;
             const ext: CalendarEvent[] = [];
             lines.forEach((line: string, i: number) => {

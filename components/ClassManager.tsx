@@ -5,11 +5,15 @@ import { fetchTeacherClasses, createClass, updateClassDetails, updateStudentEnro
 import { 
     fetchLearningUnits, createLearningUnit, deleteLearningUnit,
     fetchStudentGroups, createStudentGroup, updateStudentGroup, deleteStudentGroup,
-    fetchResourcesByType, createResource, deleteResource,
+    fetchResourcesByType, createResource, updateResource, deleteResource,
     fetchCalendarEvents, createCalendarEvent,
-    fetchCurriculumBooks, saveCurriculumBook
+    fetchCurriculumBooks, saveCurriculumBook,
+    fetchLessonPlans, deleteLessonPlan
 } from '../services/syncService';
-import { ClassRoom, Student, StudentGrade, Announcement, LearningUnit, Resource, CalendarEvent, ClassAssessment, LessonPlan, CurriculumBook, StudentGroup } from '../types';
+import { exportLessonToPDF } from '../services/curriculumPdfService';
+import { uploadResourceFile, getResourceFileAccept, deleteStorageFileByUrl } from '../services/storageService';
+import { ResourceExplorerModal } from './ResourceExplorerModal';
+import { ClassRoom, Student, StudentGrade, Announcement, LearningUnit, Resource, CalendarEvent, ClassAssessment, LessonPlan, CurriculumBook, CurriculumLesson, KeyVisual, StudentGroup, getCurriculumBookDisplayName } from '../types';
 import { read, utils } from 'xlsx';
 import {
     ArrowLeft, Plus, X, Save, Trash2, Users, BookOpen, GraduationCap,
@@ -17,14 +21,17 @@ import {
     Megaphone, PartyPopper, AlertTriangle, Info, UserPlus, FolderOpen,
     Target, FileText, Image as ImageIcon, Video, Link2, Tag, Layers,
     Brain, Ear, Move, Sparkles, TrendingUp, Award, MessageSquare, Star,
-    Download, Upload, Copy, CalendarDays, Book, Briefcase
+    Download, Upload, Copy, CalendarDays, Book, Briefcase, PenTool,
+    FlaskConical, HelpCircle, CheckCircle2, ChevronDown, ChevronUp, MapPin,
+    ExternalLink, Printer
 } from 'lucide-react';
 
 interface ClassManagerProps {
     onBack: () => void;
     onNewLesson?: (classId?: string) => void;
     onViewLesson?: (plan: LessonPlan) => void;
-    onViewCurricula?: () => void; // Optional if we want to navigate to the agent
+    onViewCurricula?: () => void;
+    onGenerateLesson?: (topic: string, grade: string, activities?: string[], subject?: string) => void;
 }
 
 const CLASSES_KEY = 'st_classes';
@@ -59,7 +66,15 @@ const GRADE_TYPES: { value: StudentGrade['type']; label: string }[] = [
     { value: 'game', label: 'لعبة تعليمية' },
 ];
 
-export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson, onViewLesson }) => {
+const MATERIAL_CONFIG: Record<string, { label: string; bg: string; border: string; textColor: string; emoji: string }> = {
+    paper: { label: 'ورقة', bg: 'bg-amber-500/10', border: 'border-amber-500/20', textColor: 'text-amber-200', emoji: '📜' },
+    stone: { label: 'حجر', bg: 'bg-stone-500/10', border: 'border-stone-500/20', textColor: 'text-stone-300', emoji: '🪨' },
+    wood: { label: 'خشب', bg: 'bg-orange-800/20', border: 'border-orange-700/30', textColor: 'text-orange-200', emoji: '🪵' },
+    fabric: { label: 'قماش', bg: 'bg-pink-500/10', border: 'border-pink-500/20', textColor: 'text-pink-200', emoji: '🧵' },
+    metal: { label: 'معدن', bg: 'bg-slate-600/20', border: 'border-slate-500/30', textColor: 'text-slate-300', emoji: '⚙️' },
+};
+
+export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson, onViewLesson, onGenerateLesson }) => {
     // --- STATE ---
     const [view, setView] = useState<ManagerView>('class-list');
     const [classes, setClasses] = useState<ClassRoom[]>([]);
@@ -106,6 +121,8 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
     const [formResourceType, setFormResourceType] = useState<Resource['type']>('link');
     const [formResourceUrl, setFormResourceUrl] = useState('');
     const [formResourceTags, setFormResourceTags] = useState('');
+    const [formResourceFile, setFormResourceFile] = useState<File | null>(null);
+    const [formResourceUploading, setFormResourceUploading] = useState(false);
     const [formAnnouncementText, setFormAnnouncementText] = useState('');
     const [formAnnouncementType, setFormAnnouncementType] = useState<Announcement['type']>('info');
     const [formGradeDate, setFormGradeDate] = useState(new Date().toISOString().split('T')[0]);
@@ -121,8 +138,20 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
     const [expandedAssessmentId, setExpandedAssessmentId] = useState<string | null>(null);
     const [gradingScores, setGradingScores] = useState<Record<string, string>>({});
 
+    const [lessonPlans, setLessonPlans] = useState<(LessonPlan & { classId?: string; createdAt?: string })[]>([]);
     const [curricula, setCurricula] = useState<CurriculumBook[]>([]);
     const [expandedBookId, setExpandedBookId] = useState<string | null>(null);
+    const [expandedLessonKey, setExpandedLessonKey] = useState<string | null>(null);
+    const [selectedCurriculumActivities, setSelectedCurriculumActivities] = useState<Record<string, string[]>>({});
+    const [showGenerateFromResource, setShowGenerateFromResource] = useState(false);
+    const [selectedResourceForGenerate, setSelectedResourceForGenerate] = useState<Resource | null>(null);
+    const [showResourceExplorer, setShowResourceExplorer] = useState(false);
+    const [resourceForExplorer, setResourceForExplorer] = useState<Resource | null>(null);
+    const [formGenTopic, setFormGenTopic] = useState('');
+    const [formGenGrade, setFormGenGrade] = useState('الصف الثالث الابتدائي');
+    const [formGenPagesTitles, setFormGenPagesTitles] = useState('');
+    const [editingResourceId, setEditingResourceId] = useState<string | null>(null);
+    const [editingResourceTitle, setEditingResourceTitle] = useState('');
 
     // --- PERSISTENCE ---
     useEffect(() => {
@@ -179,18 +208,21 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                     loadedUnits,
                     loadedGroups,
                     loadedResources,
-                    loadedBooks
+                    loadedBooks,
+                    loadedPlans
                 ] = await Promise.all([
                     fetchLearningUnits(), // Fetch all units (RLS handles user filter)
                     fetchStudentGroups(),
                     fetchResourcesByType(), // Fetch all resources
-                    fetchCurriculumBooks()
+                    fetchCurriculumBooks(),
+                    fetchLessonPlans()
                 ]);
 
                 if (loadedUnits) setUnits(loadedUnits);
                 if (loadedGroups) setStudentGroups(loadedGroups);
                 if (loadedResources) setResources(loadedResources);
                 if (loadedBooks) setCurricula(loadedBooks);
+                if (loadedPlans) setLessonPlans(loadedPlans);
                 
             } catch (err) {
                 console.error("Error fetching sync data:", err);
@@ -207,16 +239,18 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
     const refreshData = async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if(!user) return;
-        const [u, g, r, b] = await Promise.all([
+        const [u, g, r, b, p] = await Promise.all([
              fetchLearningUnits(),
              fetchStudentGroups(),
              fetchResourcesByType(),
-             fetchCurriculumBooks()
+             fetchCurriculumBooks(),
+             fetchLessonPlans()
         ]);
         if(u) setUnits(u);
         if(g) setStudentGroups(g);
         if(r) setResources(r);
         if(b) setCurricula(b);
+        if(p) setLessonPlans(p);
     };
 
     // Update Local State Helpers
@@ -240,6 +274,22 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
     const selectedClass = classes.find(c => c.id === selectedClassId) || null;
     const selectedStudent = selectedClass?.students.find(s => s.id === selectedStudentId) || null;
     const classUnits = units.filter(u => u.classId === selectedClassId);
+    // Lesson plans: filter by class AND subject — show only plans for the selected class's subject
+    const classLessonPlans = lessonPlans.filter(p => {
+        const planClassId = (p as { classId?: string }).classId;
+        if (!selectedClassId || !selectedClass) return true;
+        // Linked to class: must match
+        if (planClassId) return planClassId === selectedClassId;
+        // Unlinked: filter by subject match (المادة المختصة)
+        const planSubject = (p.subject || '').trim();
+        const classSubject = (selectedClass.subject || '').trim();
+        if (!classSubject || classSubject === 'فصل عام') return true; // General class: show all
+        if (!planSubject) return false;
+        const subjectMatch = planSubject.includes(classSubject) || classSubject.includes(planSubject);
+        const gradeMatch = !selectedClass.gradeLevel || !p.grade ||
+            p.grade.includes(selectedClass.gradeLevel) || selectedClass.gradeLevel.includes(p.grade);
+        return subjectMatch && gradeMatch;
+    });
     
     // Filter resources: 
     // 1. Explicit class link
@@ -428,13 +478,11 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
         if (!window.confirm('هل أنت متأكد من حذف هذه المجموعة؟ لن تتأثر الفصول التي أنشئت منها.')) return;
         try {
             await deleteStudentGroup(groupId);
-            
-            const { data: { user } } = await supabase.auth.getUser();
-            if(user) {
-                 const refreshed = await fetchStudentGroups();
-                 if(refreshed) setStudentGroups(refreshed);
-            }
-        } catch (e) { console.error(e); }
+            const refreshed = await fetchStudentGroups();
+            if(refreshed) setStudentGroups(refreshed);
+        } catch (e: any) {
+            alert('فشل الحذف: ' + (e?.message || 'خطأ غير متوقع'));
+        }
     };
 
     // Update handleAddClass to support creating from group
@@ -499,11 +547,24 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
 
     const handleDeleteClass = async (classId: string) => {
         if (!window.confirm('هل أنت متأكد من حذف هذا الفصل وجميع بياناته؟')) return;
-        
-        await deleteClass(classId); // Supabase
-        
-        saveClasses(classes.filter(c => c.id !== classId));
-        if (selectedClassId === classId) { setSelectedClassId(null); setView('class-list'); }
+        try {
+            await deleteClass(classId);
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data: classesData, error } = await supabase.from('classes').select('*').eq('teacher_id', user.id);
+                if (!error && classesData) {
+                    const loaded = await Promise.all(classesData.map(async (c: any) => {
+                        const { data: enrolls } = await supabase.from('class_enrollments').select('*, profiles:student_id(*)').eq('class_id', c.id);
+                        const students = (enrolls || []).map((e: any) => ({ id: e.profiles?.id || 'unknown', name: e.profiles?.full_name || 'طالب مجهول', dob: e.profiles?.dob, learningStyle: e.profiles?.learning_style, parentContact: e.profiles?.parent_contact, grades: e.grades || [], participationCount: e.participation_count || 0, behaviorNotes: e.behavior_notes }));
+                        return { id: c.id, name: c.name || c.grade, gradeLevel: c.grade, subject: c.subject, classCode: c.class_code, students, studentGroupId: undefined, announcements: c.announcements || [], assessments: c.assessments || [], color: c.color || 'from-blue-500 to-cyan-500' } as ClassRoom;
+                    }));
+                    saveClasses(loaded);
+                } else saveClasses(classes.filter(c => c.id !== classId));
+            } else saveClasses(classes.filter(c => c.id !== classId));
+            if (selectedClassId === classId) { setSelectedClassId(null); setView('class-list'); }
+        } catch (e: any) {
+            alert('فشل الحذف: ' + (e?.message || 'قد يكون الفصل مرتبطاً ببيانات أخرى.'));
+        }
     };
 
     const handleAddStudent = async () => {
@@ -863,12 +924,31 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
         if (!formResourceTitle.trim()) return;
         const { data: { user } } = await supabase.auth.getUser();
         if(!user) return;
-        
+
+        let url = formResourceUrl || undefined;
+
+        // Upload file if selected (for pdf, image, video)
+        if (formResourceFile && ['pdf', 'image', 'video'].includes(formResourceType)) {
+            setFormResourceUploading(true);
+            try {
+                url = await uploadResourceFile(formResourceFile, formResourceType as 'pdf' | 'image' | 'video');
+            } catch (e: any) {
+                setFormResourceUploading(false);
+                alert(e?.message || 'فشل رفع الملف');
+                return;
+            }
+            setFormResourceUploading(false);
+        } else if (['pdf', 'image', 'video'].includes(formResourceType) && !formResourceUrl?.trim()) {
+            alert('أدخل رابطاً أو حمّل ملفاً.');
+            return;
+        }
+
+        const fileName = formResourceFile?.name;
         await createResource({
             title: formResourceTitle.trim(),
             type: formResourceType,
-            url: formResourceUrl || undefined,
-            content: '', // Generic placeholder if needed
+            url,
+            data: fileName ? { fileName } : undefined,
             tags: formResourceTags.split(',').map(t => t.trim()).filter(Boolean),
             classId: selectedClassId || undefined
         });
@@ -880,6 +960,52 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
         setFormResourceTitle('');
         setFormResourceUrl('');
         setFormResourceTags('');
+        setFormResourceFile(null);
+    };
+
+    const addResourceFileInputRef = React.useRef<HTMLInputElement>(null);
+
+    const GRADE_OPTIONS = ["الروضة", "الصف الأول الابتدائي", "الصف الثاني الابتدائي", "الصف الثالث الابتدائي", "الصف الرابع الابتدائي", "الصف الخامس الابتدائي", "الصف السادس الابتدائي", "الصف السابع الإعدادي", "الصف الثامن الإعدادي", "الصف التاسع الإعدادي"];
+
+    const handleResourceView = (res: Resource) => {
+        if (res.url) window.open(res.url, '_blank');
+    };
+    const handleResourcePrint = (res: Resource) => {
+        if (!res.url) return;
+        const w = window.open(res.url, '_blank', 'width=800,height=600');
+        if (w) w.onload = () => { w.print(); w.close(); };
+    };
+    const handleResourceDownload = async (res: Resource) => {
+        if (!res.url) return;
+        try {
+            const r = await fetch(res.url, { mode: 'cors' });
+            const blob = await r.blob();
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = (res.data as { fileName?: string })?.fileName || res.title || 'resource';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch {
+            window.open(res.url, '_blank');
+        }
+    };
+    const openGenerateFromResource = (res: Resource) => {
+        setSelectedResourceForGenerate(res);
+        setFormGenTopic(res.title);
+        setFormGenGrade(selectedClass?.gradeLevel || 'الصف الثالث الابتدائي');
+        setFormGenPagesTitles('');
+        setShowGenerateFromResource(true);
+    };
+    const openResourceExplorer = (res: Resource) => {
+        setResourceForExplorer(res);
+        setShowResourceExplorer(true);
+    };
+    const handleGenerateFromResource = () => {
+        if (!formGenTopic.trim() || !onGenerateLesson) return;
+        const activities = formGenPagesTitles.split('\n').map(s => s.trim()).filter(Boolean);
+        onGenerateLesson(formGenTopic, formGenGrade, activities.length ? activities : undefined, selectedClass?.subject);
+        setShowGenerateFromResource(false);
+        setSelectedResourceForGenerate(null);
     };
 
     const openClassDashboard = (classId: string) => {
@@ -1609,10 +1735,12 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                                 <div className="flex items-center justify-between mb-2">
                                     <h4 className="font-bold text-white">{unit.title}</h4>
                                     <button onClick={async () => {
-                                        if(!window.confirm('هل أنت متأكد؟')) return;
-                                        await deleteLearningUnit(unit.id);
-                                        const r = await fetchLearningUnits();
-                                        if(r) setUnits(r);
+                                        if(!window.confirm('هل أنت متأكد من حذف هذه الوحدة؟')) return;
+                                        try {
+                                            await deleteLearningUnit(unit.id);
+                                            const r = await fetchLearningUnits();
+                                            if(r) setUnits(r);
+                                        } catch (e: any) { alert('فشل الحذف: ' + (e?.message || 'خطأ')); }
                                     }}
                                         className="text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-all">
                                         <Trash2 size={14} />
@@ -1643,82 +1771,144 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {classResources.map(res => (
-                        <div key={res.id} className="bg-slate-900/40 border border-slate-800 rounded-xl p-3 flex items-center gap-3 group hover:border-slate-600 transition-all">
-                            <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center flex-none">
-                                {getResourceIcon(res.type)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <h4 className="text-sm font-bold text-white truncate">{res.title}</h4>
-                                <div className="flex items-center gap-2 mt-1">
-                                    {res.tags.slice(0, 3).map(tag => (
-                                        <span key={tag} className="text-[9px] px-1.5 py-0.5 bg-slate-800 text-slate-500 rounded">{tag}</span>
-                                    ))}
+                        <div key={res.id} className="bg-slate-900/40 border border-slate-800 rounded-xl p-3 flex flex-col gap-3 group hover:border-slate-600 transition-all">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center flex-none">
+                                    {getResourceIcon(res.type)}
                                 </div>
+                                <div className="flex-1 min-w-0">
+                                    {editingResourceId === res.id ? (
+                                        <input
+                                            type="text"
+                                            value={editingResourceTitle}
+                                            onChange={e => setEditingResourceTitle(e.target.value)}
+                                            onBlur={async () => {
+                                                const title = editingResourceTitle.trim();
+                                                if (title && title !== res.title) {
+                                                    try {
+                                                        await updateResource(res.id, { title });
+                                                        setResources(prev => prev.map(r => r.id === res.id ? { ...r, title } : r));
+                                                    } catch (e: any) { alert('فشل التحديث: ' + (e?.message || 'خطأ')); }
+                                                }
+                                                setEditingResourceId(null);
+                                            }}
+                                            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                                            className="w-full bg-slate-800 border border-cyan-500/50 rounded-lg px-2 py-1 text-sm text-white"
+                                            dir="rtl"
+                                            autoFocus
+                                        />
+                                    ) : (
+                                        <h4 className="text-sm font-bold text-white truncate">{res.title}</h4>
+                                    )}
+                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                        {res.tags.slice(0, 3).map(tag => (
+                                            <span key={tag} className="text-[9px] px-1.5 py-0.5 bg-slate-800 text-slate-500 rounded">{tag}</span>
+                                        ))}
+                                        {editingResourceId !== res.id && (
+                                            <button
+                                                onClick={() => { setEditingResourceId(res.id); setEditingResourceTitle(res.title); }}
+                                                className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-cyan-400 transition-all p-0.5 rounded hover:bg-slate-700/50"
+                                                title="تغيير العنوان"
+                                            >
+                                                <Pencil size={12} />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <button onClick={async () => {
+                                    if(!window.confirm('هل أنت متأكد من حذف هذا المصدر؟')) return;
+                                    try {
+                                        if (res.url) await deleteStorageFileByUrl(res.url);
+                                        await deleteResource(res.id);
+                                        const r = await fetchResourcesByType();
+                                        if(r) setResources(r);
+                                    } catch (e: any) {
+                                        alert('فشل الحذف: ' + (e?.message || 'خطأ غير متوقع'));
+                                    }
+                                }}
+                                    className="text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-all">
+                                    <Trash2 size={14} />
+                                </button>
                             </div>
-                            <button onClick={async () => {
-                                if(!window.confirm('هل أنت متأكد؟')) return;
-                                await deleteResource(res.id);
-                                const r = await fetchResourcesByType();
-                                if(r) setResources(r);
-                            }}
-                                className="text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-all">
-                                <Trash2 size={14} />
-                            </button>
+                            {res.url && (
+                                <div className="flex flex-wrap gap-1.5">
+                                    <button onClick={() => handleResourceView(res)} title="عرض" className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[10px] font-bold">
+                                        <ExternalLink size={12} /> عرض
+                                    </button>
+                                    <button onClick={() => handleResourcePrint(res)} title="طباعة" className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[10px] font-bold">
+                                        <Printer size={12} /> طباعة
+                                    </button>
+                                    <button onClick={() => handleResourceDownload(res)} title="تحميل" className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[10px] font-bold">
+                                        <Download size={12} /> تحميل
+                                    </button>
+                                    {(res.type === 'pdf' || res.type === 'image') && onGenerateLesson && (
+                                        <button onClick={() => openResourceExplorer(res)} title="استعراض وبحث (OCR)" className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-400 text-[10px] font-bold border border-cyan-500/30">
+                                            <Search size={12} /> استعراض وبحث
+                                        </button>
+                                    )}
+                                    {onGenerateLesson && (
+                                        <button onClick={() => openGenerateFromResource(res)} title="توليد درس" className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/40 text-amber-400 text-[10px] font-bold border border-amber-500/30">
+                                            <Brain size={12} /> توليد درس
+                                        </button>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     ))}
                 </div>
             )}
 
-            {/* Saved Lessons */}
-            {(() => {
-                const savedLessons = classResources.filter(r => r.type === 'lesson-plan' && r.data);
-                if (savedLessons.length === 0) return null;
-                return (
-                    <div className="mt-6">
-                        <h3 className="text-sm font-bold text-slate-400 mb-3 flex items-center gap-2"><BookOpen size={14} /> الدروس المحفوظة</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {savedLessons.map(res => (
-                                <div key={res.id} className="bg-gradient-to-br from-cyan-950/30 to-slate-900/40 border border-cyan-500/20 rounded-xl p-4 group hover:border-cyan-500/50 transition-all">
-                                    <div className="flex items-start justify-between mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center">
-                                                <BookOpen size={18} className="text-cyan-400" />
-                                            </div>
-                                            <div>
-                                                <h4 className="text-sm font-bold text-white">{res.data!.topic}</h4>
-                                                <p className="text-[10px] text-slate-500 font-mono">{res.data!.subject} • {res.data!.grade}</p>
-                                            </div>
+            {/* Saved Lessons (from lesson_plans table) */}
+            <div className="mt-6">
+                <h3 className="text-sm font-bold text-slate-400 mb-3 flex items-center gap-2"><BookOpen size={14} /> الدروس المحفوظة</h3>
+                {classLessonPlans.length === 0 ? (
+                    <p className="text-sm text-slate-500">لا توجد دروس محفوظة بعد. أنشئ درساً من منهاجي أو إنشاء درس، ثم احفظه ليظهر هنا.</p>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {classLessonPlans.map(plan => (
+                            <div key={plan.id} className="bg-gradient-to-br from-cyan-950/30 to-slate-900/40 border border-cyan-500/20 rounded-xl p-4 group hover:border-cyan-500/50 transition-all">
+                                <div className="flex items-start justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                                            <BookOpen size={18} className="text-cyan-400" />
                                         </div>
-                                        <button onClick={async () => {
-                                            if(!window.confirm('هل أنت متأكد؟')) return;
-                                            await deleteResource(res.id);
-                                            const r = await fetchResourcesByType();
-                                            if(r) setResources(r);
-                                        }}
-                                            className="text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-all">
-                                            <Trash2 size={14} />
-                                        </button>
+                                        <div>
+                                            <h4 className="text-sm font-bold text-white">{plan.topic}</h4>
+                                            <p className="text-[10px] text-slate-500 font-mono">{plan.subject} • {plan.grade}</p>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-2 mt-2">
-                                        {res.tags.map(tag => (
-                                            <span key={tag} className="text-[9px] px-1.5 py-0.5 bg-cyan-500/10 text-cyan-400 rounded">{tag}</span>
-                                        ))}
-                                        <span className="text-[9px] text-slate-600 mr-auto font-mono">{new Date(res.createdAt).toLocaleDateString('ar')}</span>
-                                    </div>
-                                    {onViewLesson && (
-                                        <button
-                                            onClick={() => onViewLesson(res.data!)}
-                                            className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-bold hover:bg-cyan-500 hover:text-white transition-all"
-                                        >
-                                            <Eye size={14} /> فتح الدرس
-                                        </button>
-                                    )}
+                                    <button onClick={async () => {
+                                        if(!window.confirm('هل أنت متأكد من حذف هذا الدرس؟')) return;
+                                        try {
+                                            await deleteLessonPlan(plan.id);
+                                            const p = await fetchLessonPlans();
+                                            if(p) setLessonPlans(p);
+                                        } catch (e: any) { alert('فشل الحذف: ' + (e?.message || 'خطأ')); }
+                                    }}
+                                        className="text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 transition-all">
+                                        <Trash2 size={14} />
+                                    </button>
                                 </div>
-                            ))}
-                        </div>
+                                <div className="flex items-center gap-2 mt-2">
+                                    <span className="text-[9px] text-slate-600 mr-auto font-mono">
+                                        {(plan as { createdAt?: string }).createdAt
+                                            ? new Date((plan as { createdAt?: string }).createdAt).toLocaleDateString('ar')
+                                            : ''}
+                                    </span>
+                                </div>
+                                {onViewLesson && (
+                                    <button
+                                        onClick={() => onViewLesson(plan)}
+                                        className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-bold hover:bg-cyan-500 hover:text-white transition-all"
+                                    >
+                                        <Eye size={14} /> فتح الدرس
+                                    </button>
+                                )}
+                            </div>
+                        ))}
                     </div>
-                );
-            })()}
+                )}
+            </div>
         </div>
     );
 
@@ -1854,34 +2044,201 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
         );
     };
 
-    // ========== CURRICULUM BOOKS VIEW ==========
+    // ========== CURRICULUM BOOKS VIEW (Same style as منهاجي) ==========
+    const renderKeyVisual = (kv: KeyVisual, idx: number) => {
+        const config = MATERIAL_CONFIG[kv.material] || MATERIAL_CONFIG.paper;
+        return (
+            <div key={idx} className={`relative rounded-xl p-4 border ${config.bg} ${config.border} overflow-hidden`}>
+                <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">{config.emoji}</span>
+                    <span className="text-[10px] font-mono text-slate-400 uppercase">{config.label} — {kv.calligraphyStyle}</span>
+                </div>
+                <p className={`text-sm font-bold leading-relaxed ${config.textColor}`} style={{ fontFamily: 'serif' }}>
+                    « {kv.text} »
+                </p>
+            </div>
+        );
+    };
+
+    const renderCurriculumLesson = (book: CurriculumBook, lesson: CurriculumLesson, index: number) => {
+        const lessonKey = `${book.id}-${index}`;
+        const isExpanded = expandedLessonKey === lessonKey;
+        return (
+            <div key={lessonKey} className="border border-slate-800 rounded-xl overflow-hidden bg-slate-900/40 backdrop-blur-sm transition-all duration-300 hover:border-cyan-500/30">
+                <button
+                    onClick={() => setExpandedLessonKey(isExpanded ? null : lessonKey)}
+                    className="w-full flex items-center justify-between p-4 text-right hover:bg-slate-800/30 transition-colors"
+                >
+                    <div className="flex items-center gap-3 flex-1">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-black text-sm">
+                            {index + 1}
+                        </div>
+                        <div className="flex-1 text-right">
+                            <h4 className="text-white font-bold text-sm">{lesson.lessonTitle}</h4>
+                            <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                الصفحات: {lesson.pageRange?.[0] ?? 0} — {lesson.pageRange?.[1] ?? 0} • {lesson.objectives?.length ?? 0} أهداف • {lesson.activities?.length ?? 0} أنشطة
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold">
+                            <CheckCircle2 size={10} className="inline ml-1" /> جاهز
+                        </span>
+                        {isExpanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+                    </div>
+                </button>
+                {isExpanded && (
+                    <div className="border-t border-slate-800 p-5 space-y-5">
+                        {lesson.objectives?.length ? (
+                            <div>
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Target size={14} className="text-blue-400" />
+                                    <h5 className="text-sm font-bold text-blue-400">الأهداف التعليمية</h5>
+                                </div>
+                                <div className="space-y-2">
+                                    {lesson.objectives.map((obj, i) => (
+                                        <div key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 shrink-0" />
+                                            <span>{obj}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+                        {lesson.keyVisuals?.length ? (
+                            <div>
+                                <div className="flex items-center gap-2 mb-3">
+                                    <PenTool size={14} className="text-amber-400" />
+                                    <h5 className="text-sm font-bold text-amber-400">العناصر البصرية</h5>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {lesson.keyVisuals.map((kv, i) => renderKeyVisual(kv, i))}
+                                </div>
+                            </div>
+                        ) : null}
+                        {lesson.activities?.length ? (
+                            <div>
+                                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <FlaskConical size={14} className="text-emerald-400" />
+                                        <h5 className="text-sm font-bold text-emerald-400">الأنشطة والتجارب</h5>
+                                        <span className="text-[10px] text-slate-500">(اختر أنشطة للتوليد أو اترك الكل)</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedCurriculumActivities({ ...selectedCurriculumActivities, [lessonKey]: [...lesson.activities] });
+                                            }}
+                                            className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/30 font-bold"
+                                        >
+                                            تحديد الكل
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const next = { ...selectedCurriculumActivities };
+                                                delete next[lessonKey];
+                                                setSelectedCurriculumActivities(next);
+                                            }}
+                                            className="text-[10px] px-2 py-1 rounded-lg bg-slate-700/50 border border-slate-600 text-slate-400 hover:bg-slate-600/50 font-bold"
+                                        >
+                                            إلغاء التحديد
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    {lesson.activities.map((act, i) => {
+                                        const isSelected = selectedCurriculumActivities[lessonKey]?.includes(act);
+                                        return (
+                                            <div
+                                                key={i}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const current = selectedCurriculumActivities[lessonKey] || [];
+                                                    if (isSelected) {
+                                                        const next = { ...selectedCurriculumActivities, [lessonKey]: current.filter(a => a !== act) };
+                                                        if (next[lessonKey].length === 0) delete next[lessonKey];
+                                                        setSelectedCurriculumActivities(next);
+                                                    } else {
+                                                        setSelectedCurriculumActivities({ ...selectedCurriculumActivities, [lessonKey]: [...current, act] });
+                                                    }
+                                                }}
+                                                className={`rounded-lg p-3 text-sm cursor-pointer transition-colors flex items-start gap-2 ${
+                                                    isSelected
+                                                        ? 'bg-emerald-500/20 border border-emerald-500/40 text-white'
+                                                        : 'bg-emerald-500/5 border border-emerald-500/10 text-slate-300 hover:bg-emerald-500/10'
+                                                }`}
+                                            >
+                                                {isSelected ? <CheckCircle2 size={12} className="text-emerald-400 mt-0.5 shrink-0" /> : <FlaskConical size={12} className="text-emerald-500 mt-0.5 shrink-0" />}
+                                                <span>{act}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ) : null}
+                        {lesson.assessmentQuestions?.length ? (
+                            <div>
+                                <div className="flex items-center gap-2 mb-3">
+                                    <HelpCircle size={14} className="text-violet-400" />
+                                    <h5 className="text-sm font-bold text-violet-400">أسئلة التقويم</h5>
+                                </div>
+                                <div className="space-y-2">
+                                    {lesson.assessmentQuestions.map((q, i) => (
+                                        <div key={i} className="bg-violet-500/5 border border-violet-500/10 rounded-lg p-3 text-sm text-slate-300 flex items-start gap-2">
+                                            <span className="text-violet-400 font-bold shrink-0">س{i + 1}:</span>
+                                            <span>{q}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
+                        <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row gap-2">
+                            <button
+                                onClick={(e) => { e.stopPropagation(); exportLessonToPDF(lesson, book.bookMetadata); }}
+                                className="flex-1 py-3 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 font-bold text-sm flex items-center justify-center gap-2 transition-colors"
+                                title="تحميل الدرس بصيغة PDF"
+                            >
+                                <FileText size={16} /> حفظ PDF
+                            </button>
+                            {onGenerateLesson && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const acts = selectedCurriculumActivities[lessonKey] ?? lesson.activities;
+                                        onGenerateLesson(lesson.lessonTitle, book.bookMetadata?.grade || '', acts, book.bookMetadata?.subject);
+                                    }}
+                                    className="flex-1 py-3 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-sm flex items-center justify-center gap-2"
+                                    title={selectedCurriculumActivities[lessonKey]?.length ? `توليد درس بـ ${selectedCurriculumActivities[lessonKey].length} نشاط` : 'توليد درس بكل الأنشطة'}
+                                >
+                                    <Brain size={16} /> توليد درس ذكي
+                                    <span className="text-[10px] opacity-90">
+                                        ({selectedCurriculumActivities[lessonKey]?.length ? `${selectedCurriculumActivities[lessonKey].length} أنشطة` : 'كل الأنشطة'})
+                                    </span>
+                                    <Sparkles size={14} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     const renderCurriculumBooks = () => {
         if (!selectedClass) return null;
-
-        // Filter books related to this class
-        // Logic: 
-        // 1. Show if explicitly linked to this class.
-        // 2. If NOT linked to ANY class, show if GRADE matches AND SUBJECT matches (if defined).
-        // 3. Hide if linked to a DIFFERENT class.
         const filteredBooks = curricula.filter(b => {
-            if (b.linkedClassId) {
-                return b.linkedClassId === selectedClass.id;
-            }
-            
-            // Fallback for unlinked books
+            if (b.linkedClassId) return b.linkedClassId === selectedClass.id;
             const gradeMatch = !selectedClass.gradeLevel || 
-                               b.bookMetadata.grade.includes(selectedClass.gradeLevel) || 
-                               selectedClass.gradeLevel.includes(b.bookMetadata.grade);
-
+                b.bookMetadata?.grade?.includes(selectedClass.gradeLevel) || 
+                selectedClass.gradeLevel?.includes(b.bookMetadata?.grade || '');
             const subjectMatch = !selectedClass.subject || 
-                                 b.bookMetadata.subject.includes(selectedClass.subject) || 
-                                 selectedClass.subject.includes(b.bookMetadata.subject) ||
-                                 selectedClass.subject === 'فصل عام'; // Special case for general classes
-
+                b.bookMetadata?.subject?.includes(selectedClass.subject) || 
+                selectedClass.subject?.includes(b.bookMetadata?.subject || '') ||
+                selectedClass.subject === 'فصل عام';
             return gradeMatch && subjectMatch;
         });
-        
-        const displayBooks = filteredBooks;
 
         return (
             <div>
@@ -1890,71 +2247,82 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                         <Book size={20} className="text-cyan-400" /> المناهج المحللة
                     </h2>
                 </div>
-
-                {displayBooks.length === 0 ? (
+                {filteredBooks.length === 0 ? (
                     <div className="text-center py-20">
                         <Book size={48} className="text-slate-700 mx-auto mb-4" />
                         <p className="text-lg text-slate-500 mb-2">لا توجد مناهج محفوظة</p>
                         <p className="text-sm text-slate-600">قم بتحليل الكتب المدرسية عبر وكيل "منهاجي"</p>
                     </div>
                 ) : (
-                    <div className="space-y-4">
-                        {displayBooks.map(book => {
+                    <div className="space-y-6">
+                        {filteredBooks.map(book => {
                             const isExpanded = expandedBookId === book.id;
                             return (
-                                <div key={book.id} className="bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden hover:border-cyan-500/30 transition-all">
+                                <div key={book.id} className="rounded-2xl overflow-hidden border border-slate-800 bg-slate-900/40">
                                     <div 
-                                        onClick={() => setExpandedBookId(isExpanded ? null : book.id)}
-                                        className="p-4 flex items-center gap-4 cursor-pointer hover:bg-slate-900/80 transition-colors"
+                                        onClick={() => { setExpandedBookId(isExpanded ? null : book.id); setExpandedLessonKey(null); }}
+                                        className="p-4 cursor-pointer hover:bg-slate-800/30 transition-colors border-b border-slate-800"
                                     >
-                                        <div className="w-12 h-12 rounded-xl bg-cyan-900/20 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
-                                            <BookOpen size={24} />
-                                        </div>
-                                        <div className="flex-1">
-                                            <h3 className="font-bold text-white text-lg">{book.fileName}</h3>
-                                            <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
-                                                <span>{book.bookMetadata.subject}</span>
-                                                <span>•</span>
-                                                <span>{book.bookMetadata.grade}</span>
-                                                <span>•</span>
-                                                <span>{book.curriculumStructure.length} درس</span>
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center">
+                                                <BookOpen size={28} className="text-cyan-400" />
                                             </div>
+                                            <div className="flex-1">
+                                                <h3 className="text-lg font-black text-white">{getCurriculumBookDisplayName(book)}</h3>
+                                                <p className="text-sm text-slate-500 mt-0.5">
+                                                    {book.bookMetadata?.subject} • {book.bookMetadata?.grade} • {book.curriculumStructure?.length ?? 0} درس
+                                                </p>
+                                            </div>
+                                            {isExpanded ? <ChevronUp size={20} className="text-slate-400" /> : <ChevronDown size={20} className="text-slate-400" />}
                                         </div>
-                                        {isExpanded ? <ChevronLeft size={20} className="-rotate-90 text-slate-500" /> : <ChevronLeft size={20} className="text-slate-500" />}
                                     </div>
-
                                     {isExpanded && (
-                                        <div className="border-t border-slate-800 p-4 bg-slate-950/30">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                {book.curriculumStructure.map((lesson, idx) => (
-                                                    <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-3 hover:border-cyan-500/20 transition-all group">
-                                                        <div className="flex items-start justify-between">
-                                                            <div>
-                                                                <div className="flex items-center gap-2 mb-1">
-                                                                    <span className="w-5 h-5 rounded-md bg-slate-800 flex items-center justify-center text-[10px] text-slate-500 font-bold border border-slate-700">{idx + 1}</span>
-                                                                    <h4 className="font-bold text-slate-200 text-sm">{lesson.lessonTitle}</h4>
-                                                                </div>
-                                                                <p className="text-[10px] text-slate-500 pr-7">
-                                                                    {lesson.objectives.length} أهداف • ص {lesson.pageRange[0]}-{lesson.pageRange[1]}
-                                                                </p>
-                                                            </div>
-                                                            {onNewLesson && (
-                                                                <button 
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        // We can't pass topic directly here as onNewLesson takes classId, 
-                                                                        // but ideally we'd pass lesson data. For now, navigate to create.
-                                                                        onNewLesson(selectedClassId || undefined);
-                                                                    }}
-                                                                    className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-cyan-500 hover:text-white"
-                                                                    title="تخطيط هذا الدرس"
-                                                                >
-                                                                    <Pencil size={14} />
-                                                                </button>
-                                                            )}
-                                                        </div>
+                                        <div className="p-6 space-y-6 bg-slate-950/30">
+                                            {/* بيانات الكتاب - مثل منهاجي */}
+                                            <div className="border border-cyan-500/20 rounded-2xl bg-gradient-to-br from-cyan-950/30 to-blue-950/20 p-5">
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <BookOpen size={20} className="text-cyan-400" />
+                                                    <h4 className="font-bold text-white">بيانات الكتاب</h4>
+                                                </div>
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-center">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">المادة</div>
+                                                        <div className="text-white font-bold">{book.bookMetadata?.subject || '—'}</div>
                                                     </div>
-                                                ))}
+                                                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-center">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">الصف</div>
+                                                        <div className="text-white font-bold">{book.bookMetadata?.grade || '—'}</div>
+                                                    </div>
+                                                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-center">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">الجزء</div>
+                                                        <div className="text-white font-bold">{book.bookMetadata?.part || '—'}</div>
+                                                    </div>
+                                                    <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 text-center">
+                                                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">الدروس</div>
+                                                        <div className="text-cyan-400 font-black text-xl">{book.curriculumStructure?.length ?? 0}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {/* ربط بالفصل */}
+                                            {book.linkedClassId && (
+                                                <div className="flex items-center gap-3 p-4 rounded-xl bg-slate-900/50 border border-slate-800">
+                                                    <MapPin size={18} className="text-emerald-400" />
+                                                    <span className="text-sm text-slate-400">مرتبط بالفصل:</span>
+                                                    <span className="text-sm font-bold text-emerald-400">
+                                                        {classes.find(c => c.id === book.linkedClassId)?.name || selectedClass?.name}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {/* هيكل المنهج - دروس بتنسيق منهاجي */}
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-4">
+                                                    <Layers size={18} className="text-cyan-400" />
+                                                    <h4 className="text-lg font-bold text-slate-200">هيكل المنهج</h4>
+                                                    <div className="h-[1px] flex-1 bg-gradient-to-l from-transparent via-slate-700 to-transparent" />
+                                                </div>
+                                                <div className="grid grid-cols-1 gap-3">
+                                                    {(book.curriculumStructure || []).map((lesson, idx) => renderCurriculumLesson(book, lesson, idx))}
+                                                </div>
                                             </div>
                                         </div>
                                     )}
@@ -2303,23 +2671,72 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
             </>)}
 
             {/* Add Resource Modal */}
-            {renderModal(showAddResource, () => setShowAddResource(false), 'مصدر جديد', <>
+            {showResourceExplorer && (
+                <ResourceExplorerModal
+                    resource={resourceForExplorer}
+                    onClose={() => { setShowResourceExplorer(false); setResourceForExplorer(null); }}
+                    onGenerate={(topic, grade, pagesOrTitles, subject) => {
+                        if (onGenerateLesson) onGenerateLesson(topic, grade, pagesOrTitles, subject ?? selectedClass?.subject);
+                        setShowResourceExplorer(false);
+                        setResourceForExplorer(null);
+                    }}
+                    onSaveResource={async (resourceId, updates) => {
+                        await updateResource(resourceId, updates);
+                        setResources(prev => prev.map(r => r.id === resourceId ? { ...r, data: updates.data ?? r.data } : r));
+                        setResourceForExplorer(prev => prev?.id === resourceId ? { ...prev, data: updates.data ?? prev.data } : prev);
+                    }}
+                    defaultGrade={selectedClass?.gradeLevel || 'الصف الثالث الابتدائي'}
+                    gradeOptions={GRADE_OPTIONS}
+                />
+            )}
+            {renderModal(showGenerateFromResource, () => { setShowGenerateFromResource(false); setSelectedResourceForGenerate(null); }, 'توليد درس من المصدر', <>
+                <p className="text-xs text-slate-500 mb-3">اختر عنوان الدرس والصف، وأدخل صفحات أو عناوين للتركيز عليها (سطر لكل عنصر):</p>
+                <div><label className={labelClass}>عنوان الدرس *</label><input type="text" value={formGenTopic} onChange={e => setFormGenTopic(e.target.value)} placeholder="مثال: الحيوانات الأليفة" className={inputClass} dir="rtl" /></div>
+                <div><label className={labelClass}>الصف</label>
+                    <select value={formGenGrade} onChange={e => setFormGenGrade(e.target.value)} className={inputClass} dir="rtl">
+                        {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                </div>
+                <div><label className={labelClass}>صفحات أو عناوين للتركيز عليها (اختياري)</label><textarea value={formGenPagesTitles} onChange={e => setFormGenPagesTitles(e.target.value)} placeholder="ص 12-15&#10;الفصل الثالث&#10;وحدة النباتات" rows={3} className={`${inputClass} resize-none`} dir="rtl" /></div>
+                <div className="flex gap-3 pt-2">
+                    <button onClick={handleGenerateFromResource} disabled={!formGenTopic.trim()} className={btnPrimary}><Brain size={16} /> توليد الدرس</button>
+                </div>
+            </>)}
+            {renderModal(showAddResource, () => { setShowAddResource(false); setFormResourceFile(null); }, 'مصدر جديد', <>
                 <div><label className={labelClass}>عنوان المصدر *</label><input type="text" value={formResourceTitle} onChange={e => setFormResourceTitle(e.target.value)} placeholder="مثال: كتاب العلوم" className={inputClass} dir="rtl" /></div>
                 <div>
                     <label className={labelClass}>النوع</label>
                     <div className="grid grid-cols-5 gap-2">
                         {(['pdf', 'image', 'video', 'link', 'template'] as Resource['type'][]).map(t => (
-                            <button key={t} onClick={() => setFormResourceType(t)}
+                            <button key={t} onClick={() => { setFormResourceType(t); setFormResourceFile(null); }}
                                 className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border text-[10px] font-bold transition-all ${formResourceType === t ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-500'}`}>
                                 {getResourceIcon(t)} {t}
                             </button>
                         ))}
                     </div>
                 </div>
-                <div><label className={labelClass}>رابط/مسار</label><input type="text" value={formResourceUrl} onChange={e => setFormResourceUrl(e.target.value)} placeholder="https://..." className={inputClass} /></div>
+                {['pdf', 'image', 'video'].includes(formResourceType) ? (
+                    <div className="space-y-2">
+                        <label className={labelClass}>تحميل ملف أو رابط</label>
+                        <div className="flex flex-wrap gap-2">
+                            <input ref={addResourceFileInputRef} type="file" accept={getResourceFileAccept(formResourceType as 'pdf'|'image'|'video')} className="hidden"
+                                onChange={e => { const f = e.target.files?.[0]; if (f) { setFormResourceFile(f); setFormResourceTitle(prev => prev.trim() || f.name); } e.target.value = ''; }} />
+                            <button type="button" onClick={() => addResourceFileInputRef.current?.click()}
+                                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 border border-slate-600 text-slate-300 text-xs font-bold hover:bg-slate-700 hover:border-slate-500 transition-all">
+                                <Upload size={14} /> {formResourceFile ? formResourceFile.name : (formResourceType === 'pdf' ? 'اختر PDF' : formResourceType === 'image' ? 'اختر صورة' : 'اختر فيديو')}
+                            </button>
+                            {formResourceFile && <button type="button" onClick={() => setFormResourceFile(null)} className="text-red-400 hover:text-red-300 text-xs">إلغاء</button>}
+                        </div>
+                        <input type="text" value={formResourceUrl} onChange={e => setFormResourceUrl(e.target.value)} placeholder="أو أدخل رابطاً: https://..." className={inputClass} dir="ltr" />
+                    </div>
+                ) : (
+                    <div><label className={labelClass}>رابط/مسار</label><input type="text" value={formResourceUrl} onChange={e => setFormResourceUrl(e.target.value)} placeholder="https://..." className={inputClass} /></div>
+                )}
                 <div><label className={labelClass}>وسوم (فاصلة بينها)</label><input type="text" value={formResourceTags} onChange={e => setFormResourceTags(e.target.value)} placeholder="علوم, أحياء, صف ثاني" className={inputClass} dir="rtl" /></div>
                 <div className="flex gap-3 pt-2">
-                    <button onClick={handleAddResource} disabled={!formResourceTitle.trim()} className={btnPrimary}><Save size={16} /> إضافة المصدر</button>
+                    <button onClick={handleAddResource} disabled={!formResourceTitle.trim() || formResourceUploading} className={btnPrimary}>
+                        {formResourceUploading ? 'جاري الرفع...' : <><Save size={16} /> إضافة المصدر</>}
+                    </button>
                 </div>
             </>)}
 

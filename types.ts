@@ -167,6 +167,8 @@ export interface InfographicSection {
     content: string;
     icon: string; // Lucide icon name or emoji
     color: string;
+    visualDescription?: string; // English prompt for Disney/Pixar style image
+    imageUrl?: string; // Generated image URL/base64
 }
 
 export interface VideoScriptScene {
@@ -367,6 +369,16 @@ export interface CurriculumBook {
     liveThoughts: string[];
     curriculumStructure: CurriculumLesson[];
 }
+
+/** Returns display name for curriculum book - uses metadata when fileName is generic */
+export const getCurriculumBookDisplayName = (book: CurriculumBook): string => {
+    const generic = !book.fileName || book.fileName === 'Uploaded Book' || book.fileName === 'كتاب محلل';
+    if (generic && book.bookMetadata) {
+        const parts = [book.bookMetadata.subject, book.bookMetadata.grade, book.bookMetadata.part].filter(Boolean);
+        if (parts.length > 0) return parts.join(' - ');
+    }
+    return book.fileName || 'كتاب محلل';
+};
 
 export interface UserStats {
     level: number;
