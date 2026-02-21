@@ -9,7 +9,7 @@ import {
     Map, Scroll, Trophy, MessageCircle, Star, Palette, FlaskConical, 
     Compass, X, Send, User, ChevronRight, Lock, Unlock, PlayCircle,
     Award, Crown, Layout, Zap, BookOpen, Mic, Volume2, CheckCircle, HelpCircle,
-    Bell, Gift
+    Bell, Gift, Target, Sparkles
 } from 'lucide-react';
 
 // Initialize Gemini for "Little Aleem"
@@ -42,9 +42,9 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
     const [currentSlide, setCurrentSlide] = useState(0); // Track slide progress
     const [unlockedLessons, setUnlockedLessons] = useState<string[]>([]); // Using lesson names/ids
     const [chatOpen, setChatOpen] = useState(false);
-    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-        { id: '1', sender: 'aleem', text: 'مرحباً يا بطل! أنا "عليم"، صديقك في رحلة المعرفة. هل وجدت كلمة صعبة اليوم؟' }
-    ]);
+    const studentName = userParams?.name || 'بطل';
+    const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+    const [chatInitialized, setChatInitialized] = useState(false);
     const [chatInput, setChatInput] = useState('');
     const [isChatLoading, setIsChatLoading] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
@@ -56,6 +56,18 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
     const [level, setLevel] = useState(12);
     const [oasisTasks, setOasisTasks] = useState<OasisTask[]>([]);
     const [activeTask, setActiveTask] = useState<OasisTask | null>(null);
+    const [showCompletionModal, setShowCompletionModal] = useState(false);
+    const [lastCompletedLesson, setLastCompletedLesson] = useState<CurriculumLesson | null>(null);
+    const [lessonQuizMode, setLessonQuizMode] = useState(false);
+
+    // Initialize personalized chat greeting
+    useEffect(() => {
+        if (!chatInitialized) {
+            const greeting = `مرحباً يا ${studentName}! أنا "عليم"، صديقك في رحلة المعرفة. اسألني عن أي كلمة صعبة أو مفهوم في دروسك.`;
+            setChatMessages([{ id: '1', sender: 'aleem', text: greeting }]);
+            setChatInitialized(true);
+        }
+    }, [studentName, chatInitialized]);
 
     // Initialize User & Sync
     useEffect(() => {
@@ -190,12 +202,15 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
         }
 
         try {
+            const lessonContext = activeLesson 
+                ? `الطالب يدرس حالياً درس: "${activeLesson.lessonTitle}". أهداف الدرس: ${activeLesson.objectives.slice(0, 2).join('؛ ')}. ركّز إجاباتك على هذا السياق عند الإمكان.`
+                : '';
+            const systemInstruction = `أنت 'عليم'، مساعد ذكي ولطيف للأطفال في المرحلة الابتدائية. مهمتك شرح الكلمات الصعبة والمفاهيم العلمية بأسلوب مبسط جداً ومرح، واستخدام تشبيهات من الطبيعة والحياة اليومية. تحدث باللغة العربية الفصحى البسيطة مع بعض كلمات التشجيع. إجاباتك يجب أن تكون قصيرة (أقل من 50 كلمة) لكي لا يمل الطفل. ${lessonContext}`;
+
             const response = await ai.models.generateContent({
                 model: "gemini-2.0-flash-lite",
                 contents: [{ parts: [{ text: chatInput }] }],
-                config: {
-                    systemInstruction: "أنت 'عليم'، مساعد ذكي ولطيف للأطفال في المرحلة الابتدائية. مهمتك شرح الكلمات الصعبة والمفاهيم العلمية بأسلوب مبسط جداً ومرح، واستخدام تشبيهات من الطبيعة والحياة اليومية. تحدث باللغة العربية الفصحى البسيطة مع بعض كلمات التشجيع. إجاباتك يجب أن تكون قصيرة (أقل من 50 كلمة) لكي لا يمل الطفل."
-                }
+                config: { systemInstruction }
             });
             
             const responseText = response.text || "عذراً يا صديقي، لم أستطع فهم ذلك.";
@@ -320,7 +335,7 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
             : 'bg-[#fdfbf7] text-slate-900 border-amber-200'; // Paper
 
         return (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-300">
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-300 pointer-events-auto">
                 <div className={`relative max-w-lg w-full rounded-sm shadow-2xl overflow-hidden p-8 ${bgColor}`}>
                     
                     {/* Texture Overlay */}
@@ -373,19 +388,14 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
     };
 
 
-    const handleLessonCompletion = async () => {
-        if (!activeLesson || !selectedBook || !userId) return;
-
-        // 1. Award XP & Level
-        const newXp = xp + 50;
+    const finishLessonWithCelebration = async () => {
+        if (!activeLesson || !selectedBook) return;
+        const xpReward = 50;
+        const newXp = xp + xpReward;
         setXp(newXp);
         const newLevel = Math.floor(newXp / 1000) + 1;
-        if (newLevel > level) {
-             alert(`🎉 مبروك! لقد وصلت للمستوى ${newLevel}!`);
-             setLevel(newLevel);
-        }
+        if (newLevel > level) setLevel(newLevel);
 
-        // 2. Unlock Next Lesson locally
         const currentIdx = selectedBook.curriculumStructure.findIndex(l => l.lessonTitle === activeLesson.lessonTitle);
         let nextLessonTitle = '';
         if (currentIdx >= 0 && currentIdx < selectedBook.curriculumStructure.length - 1) {
@@ -395,146 +405,145 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
             }
         }
 
-        // 3. Persist to DB
         try {
-            // Save Progress
-            const { error } = await supabase.from('student_progress').insert({
-                student_id: userId,
-                // We verify unlocking the NEXT one
-                // Or better, we log completion of CURRENT one.
-                // The unlocking logic on load checks 'lesson_title' in progress table.
-                // If we store COMPLETED lessons, we should store currentLessonTitle.
-                // Re-reading init logic: const dbUnlocked = progress.map(p => p.lesson_title); setUnlockedLessons(...)
-                // So the DB stores UNLOCKED lesson titles? Or completed ones?
-                // Usually progress stores "completed: lesson X". And UI unlocks "X+1".
-                // But init logic uses the list directly as unlocked list.
-                // So if I complete Lesson 1, I should insert Lesson 2 into DB so it appears in unlocked list.
-                // Yes, let's insert the *next* lesson title if it exists.
-                lesson_title: nextLessonTitle || 'COMPLETED_ALL' 
-            });
-            
-            if (error) throw error;
-            
-            // Sync Profile XP
-            await supabase.from('profiles').update({ xp: newXp, level: newLevel }).eq('id', userId);
-            
-            alert(`✨ أحسنت! أكملت الدرس "${activeLesson.lessonTitle}" وحصلت على 50 نقطة!`);
-            setViewMode('map');
-            setActiveLesson(null);
-            setCurrentSlide(0);
-        } catch (e) {
-            console.error("Error saving progress:", e);
-            alert("حدث خطأ في حفظ تقدمك، لكن لا تقلق، نقاطك محفوظة محلياً.");
-            setViewMode('map');
+            if (userId) {
+                await supabase.from('student_progress').insert({ student_id: userId, lesson_title: nextLessonTitle || 'COMPLETED_ALL' });
+                await supabase.from('profiles').update({ xp: newXp, level: newLevel }).eq('id', userId);
+            }
+        } catch (e) { console.error("Error saving progress:", e); }
+
+        setLastCompletedLesson(activeLesson);
+        setShowCompletionModal(true);
+        setLessonQuizMode(false);
+    };
+
+    const handleLessonCompletion = async () => {
+        if (!activeLesson || !selectedBook) return;
+        const hasQuiz = activeLesson.assessmentQuestions && activeLesson.assessmentQuestions.length > 0;
+        if (hasQuiz && !lessonQuizMode) {
+            setLessonQuizMode(true);
+            return;
         }
+        await finishLessonWithCelebration();
+    };
+
+    const closeCompletionModal = () => {
+        setShowCompletionModal(false);
+        setLastCompletedLesson(null);
+        setViewMode('map');
+        setActiveLesson(null);
+        setCurrentSlide(0);
     };
 
     // --- Lesson Player Renderer ---
     const renderLessonPlayer = () => {
         if (!activeLesson) return null;
-        const totalSlides = 5; 
+        const totalSlides = Math.max(5, Math.ceil((activeLesson.objectives.length + activeLesson.activities.length) / 2) || 5);
+        const firstQuizQuestion = activeLesson.assessmentQuestions?.[0];
+
+        // Quiz mode: اختبار فهم سريع
+        if (lessonQuizMode && firstQuizQuestion) {
+            return (
+                <div className="w-full h-full flex flex-col bg-slate-900/90 backdrop-blur-xl relative z-20">
+                    <div className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-slate-900/50">
+                        <button onClick={() => setLessonQuizMode(false)} className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300">
+                            <ChevronRight size={20} />
+                        </button>
+                        <h2 className="text-white font-bold">اختبار فهم سريع</h2>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center justify-center">
+                        <div className="max-w-xl w-full bg-amber-900/30 border border-amber-500/40 rounded-2xl p-8 text-center">
+                            <Target size={48} className="mx-auto mb-4 text-amber-400" />
+                            <h3 className="text-amber-100 font-bold text-lg mb-6">قبل أن تنهي، تأكد من فهمك:</h3>
+                            <p className="text-slate-200 text-lg leading-relaxed mb-8">{firstQuizQuestion}</p>
+                            <p className="text-amber-200/80 text-sm mb-6">فكّر في إجابتك، ثم اضغط للتأكيد</p>
+                            <button
+                                onClick={handleLessonCompletion}
+                                className="px-8 py-4 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-500 shadow-lg shadow-emerald-500/20 flex items-center gap-2 mx-auto"
+                            >
+                                <CheckCircle size={20} /> أكملت الفهم، إنهاء الدرس
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
 
         return (
             <div className="w-full h-full flex flex-col bg-slate-900/90 backdrop-blur-xl relative z-20">
-                {/* Player Header */}
                 <div className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-slate-900/50">
                     <div className="flex items-center gap-4">
                         <button 
-                            onClick={() => { setViewMode('map'); setCurrentSlide(0); }}
+                            onClick={() => { setViewMode('map'); setCurrentSlide(0); setLessonQuizMode(false); }}
                             className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
                         >
                             <ChevronRight size={20} />
                         </button>
                         <div>
                             <h2 className="text-white font-bold text-lg leading-tight">{activeLesson.lessonTitle}</h2>
-                            <p className="text-xs text-amber-500 font-mono">جاري التعلم...</p>
+                            <p className="text-xs text-amber-500 font-mono">مرحباً {studentName}، جاري التعلم...</p>
                         </div>
                     </div>
-                    
-                    <div className="flex items-center gap-2">
-                         <div className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/30">
-                            نشط الآن
-                         </div>
-                    </div>
+                    <div className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/30">نشط الآن</div>
                 </div>
 
-                {/* Player Content */}
                 <div className="flex-1 overflow-y-auto p-8 custom-scrollbar relative">
                     <div className="max-w-4xl mx-auto space-y-8">
-                        
-                        {/* Slide Area */}
-                        <div className="aspect-video bg-black rounded-2xl border border-slate-700 overflow-hidden relative group shadow-2xl">
-                             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500">
-                                <PlayCircle size={64} className="mb-4 opacity-50 group-hover:scale-110 transition-transform duration-500 text-amber-500" />
-                                <p className="text-lg font-bold">محتوى الدرس التفاعلي</p>
-                                <p className="text-sm opacity-60 mt-2">شريحة {currentSlide + 1} من {totalSlides}</p>
-                             </div>
-                             
-                             {/* Progress Bar */}
-                             <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-800">
+                        <div className="aspect-video bg-gradient-to-br from-amber-950/50 to-slate-900 rounded-2xl border border-amber-500/30 overflow-hidden relative flex flex-col items-center justify-center">
+                            {activeLesson.keyVisuals?.[currentSlide % (activeLesson.keyVisuals.length || 1)] ? (
+                                <div className="p-6 text-center">
+                                    <span className="text-4xl mb-2 block">
+                                        {activeLesson.keyVisuals[currentSlide % activeLesson.keyVisuals.length].material === 'stone' ? '🪨' : 
+                                         activeLesson.keyVisuals[currentSlide % activeLesson.keyVisuals.length].material === 'wood' ? '🪵' : 
+                                         activeLesson.keyVisuals[currentSlide % activeLesson.keyVisuals.length].material === 'fabric' ? '🧵' : '📜'}
+                                    </span>
+                                    <p className="text-amber-100 font-serif text-lg">« {activeLesson.keyVisuals[currentSlide % activeLesson.keyVisuals.length].text} »</p>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center text-slate-400">
+                                    <BookOpen size={48} className="mb-2 text-amber-500/60" />
+                                    <p className="font-bold">شريحة {currentSlide + 1} من {totalSlides}</p>
+                                </div>
+                            )}
+                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-800">
                                 <div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${((currentSlide + 1) / totalSlides) * 100}%` }}></div>
-                             </div>
+                            </div>
                         </div>
 
-                        {/* Content based on slide (Mock) */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
-                                <h3 className="text-amber-400 font-bold mb-4 flex items-center gap-2">
-                                    <Star size={18} /> أهداف الدرس
-                                </h3>
+                                <h3 className="text-amber-400 font-bold mb-4 flex items-center gap-2"><Star size={18} /> أهداف الدرس</h3>
                                 <ul className="space-y-3">
                                     {activeLesson.objectives.map((obj, i) => (
                                         <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0" />
-                                            {obj}
+                                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0" />{obj}
                                         </li>
                                     ))}
                                 </ul>
                             </div>
-
-                             <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
-                                <h3 className="text-cyan-400 font-bold mb-4 flex items-center gap-2">
-                                    <Zap size={18} /> الأنشطة المطلوبة
-                                </h3>
+                            <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+                                <h3 className="text-cyan-400 font-bold mb-4 flex items-center gap-2"><Zap size={18} /> الأنشطة</h3>
                                 <ul className="space-y-3">
                                     {activeLesson.activities.slice(0, currentSlide + 1).map((act, i) => (
-                                        <li key={i} className="flex items-start gap-2 text-sm text-slate-300 animate-in fade-in slide-in-from-right-4">
-                                            <div className="w-5 h-5 rounded flex items-center justify-center bg-cyan-500/20 text-cyan-400 text-[10px] font-bold shrink-0">
-                                                {i + 1}
-                                            </div>
+                                        <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                                            <div className="w-5 h-5 rounded flex items-center justify-center bg-cyan-500/20 text-cyan-400 text-[10px] font-bold shrink-0">{i + 1}</div>
                                             {act}
                                         </li>
                                     ))}
                                 </ul>
                             </div>
                         </div>
-
                     </div>
                 </div>
 
-                {/* Footer Controls */}
                 <div className="h-20 border-t border-white/10 bg-slate-900/80 backdrop-blur flex items-center justify-center gap-4">
-                    <button 
-                        onClick={() => setCurrentSlide(Math.max(0, currentSlide - 1))}
-                        disabled={currentSlide === 0}
-                        className="px-6 py-3 rounded-xl bg-slate-800 text-slate-400 font-bold hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        السابق
-                    </button>
+                    <button onClick={() => setCurrentSlide(Math.max(0, currentSlide - 1))} disabled={currentSlide === 0}
+                        className="px-6 py-3 rounded-xl bg-slate-800 text-slate-400 font-bold hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed">السابق</button>
                     <span className="font-mono text-slate-500 mx-4">{currentSlide + 1} / {totalSlides}</span>
-                    
                     {currentSlide < totalSlides - 1 ? (
-                        <button 
-                            onClick={() => setCurrentSlide(currentSlide + 1)}
-                            className="px-6 py-3 rounded-xl bg-amber-600 text-white font-bold hover:bg-amber-500 transition-colors shadow-lg shadow-amber-500/20"
-                        >
-                            التالي
-                        </button>
+                        <button onClick={() => setCurrentSlide(currentSlide + 1)} className="px-6 py-3 rounded-xl bg-amber-600 text-white font-bold hover:bg-amber-500 shadow-lg shadow-amber-500/20">التالي</button>
                     ) : (
-                        <button 
-                            onClick={handleLessonCompletion}
-                            className="px-6 py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-500/20 flex items-center gap-2"
-                        >
+                        <button onClick={handleLessonCompletion} className="px-6 py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-500 shadow-lg shadow-emerald-500/20 flex items-center gap-2">
                             <CheckCircle size={18} /> إنهاء الدرس
                         </button>
                     )}
@@ -565,6 +574,41 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
                 />
                 
                 <div className="relative z-10 max-w-3xl mx-auto space-y-8">
+                    {/* Personalized Welcome & Progress */}
+                    <div className="bg-amber-900/30 border border-amber-500/30 rounded-2xl p-6 mb-8">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            <div>
+                                <h2 className="text-2xl font-black text-amber-100 flex items-center gap-2">
+                                    <Sparkles className="text-amber-400" size={24} />
+                                    مرحباً يا {studentName}!
+                                </h2>
+                                <p className="text-amber-200/80 text-sm mt-1">رحلة المعرفة تنتظرك. اختر المحطة التالية!</p>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <div className="text-center">
+                                    <div className="text-2xl font-black text-amber-400">
+                                        {Math.max(0, unlockedLessons.filter(t => selectedBook.curriculumStructure.some(l => l.lessonTitle === t)).length - 1)}
+                                        <span className="text-amber-200/60 text-base font-normal"> / {selectedBook.curriculumStructure.length}</span>
+                                    </div>
+                                    <div className="text-[10px] text-amber-200/70 font-bold">دروس مكتملة</div>
+                                </div>
+                                <div className="w-24 h-24 rounded-full border-2 border-amber-500/50 flex items-center justify-center bg-amber-500/10">
+                                    <span className="text-2xl font-black text-amber-400">المستوى {level}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="mt-4 flex items-center gap-2">
+                            <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                                <div className="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-full transition-all" style={{ width: `${Math.min(100, (xp % 1000) / 10)}%` }}></div>
+                            </div>
+                            <span className="text-xs font-mono text-amber-200/80">{xp} XP</span>
+                        </div>
+                        <div className="mt-3 flex items-center gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                            <Target size={16} className="text-amber-400 shrink-0" />
+                            <span className="text-sm text-amber-200/90">مهمة اليوم: أكمل درساً واحداً على الأقل واجمع كنزاً جديداً!</span>
+                        </div>
+                    </div>
+
                     <div className="text-center mb-8">
                         <h2 className="text-2xl font-black text-amber-100 drop-shadow-md">{selectedBook.bookMetadata.subject} - خريطة الكنز</h2>
                         <p className="text-amber-200/80 text-sm">أكمل الدروس لتضيء الخريطة وتكتشف الكنوز!</p>
@@ -724,12 +768,11 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
     };
 
     const renderLeaderboard = () => {
-        // Mock data
-        const students = [
+        const students: { name: string; points: number; badge: string; isCurrent?: boolean }[] = [
             { name: "أحمد الفاتح", points: 1250, badge: "master" },
             { name: "سارة النور", points: 1100, badge: "diamond" },
             { name: "كريم الجبل", points: 950, badge: "gold" },
-            { name: "أنت (محمد)", points: 840, badge: "silver" },
+            { name: `أنت (${studentName})`, points: xp, badge: "silver", isCurrent: true },
             { name: "ليلى الورد", points: 720, badge: "bronze" },
         ];
         
@@ -743,10 +786,9 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
                 </div>
 
                 <div className="space-y-4">
-                    {/* Top 3 Podium-ish logic could go here, but list is simpler for now */}
                     {students.map((student, i) => (
                         <div key={i} className={`flex items-center gap-4 p-4 rounded-2xl border backdrop-blur-sm transition-transform hover:scale-[1.02] ${
-                            student.name.includes("أنت") 
+                            student.isCurrent 
                                 ? 'bg-amber-500/20 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.15)] order-first mb-6 transform scale-105 ring-1 ring-amber-400/50' 
                                 : 'bg-slate-900/60 border-slate-700/50'
                         }`}>
@@ -760,16 +802,16 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
                             </div>
                             
                             <div className="flex-1">
-                                <h4 className={`font-bold ${student.name.includes("أنت") ? 'text-amber-100' : 'text-slate-200'}`}>
+                                <h4 className={`font-bold ${student.isCurrent ? 'text-amber-100' : 'text-slate-200'}`}>
                                     {student.name}
                                 </h4>
                                 <div className="flex items-center gap-1 text-[10px] text-slate-400">
-                                    <Award size={10} /> المستوى 12
+                                    <Award size={10} /> المستوى {student.isCurrent ? level : '12'}
                                 </div>
                             </div>
 
                             <div className="text-right">
-                                <div className="font-black text-xl text-amber-400">{student.points}</div>
+                                <div className="font-black text-xl text-amber-400">{student.isCurrent ? xp : student.points}</div>
                                 <div className="text-[10px] text-amber-500/50 font-mono">نقطة XP</div>
                             </div>
                         </div>
@@ -786,6 +828,30 @@ export const StudentOasis: React.FC<StudentOasisProps> = ({ onBack, userParams, 
             <div className="absolute inset-0 pointer-events-none z-0">
                 {renderActiveTask()}
                 {renderAdminOverlay()}
+                {/* Completion Celebration Modal */}
+                {showCompletionModal && lastCompletedLesson && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4 pointer-events-auto animate-in fade-in zoom-in duration-300">
+                        <div className="relative max-w-md w-full bg-gradient-to-br from-amber-900/95 to-orange-900/95 border-2 border-amber-500/50 rounded-2xl p-8 shadow-2xl text-center overflow-hidden">
+                            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500"></div>
+                            <div className="relative z-10">
+                                <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-amber-500/30 flex items-center justify-center animate-pulse">
+                                    <Trophy size={40} className="text-amber-400" />
+                                </div>
+                                <h2 className="text-2xl font-black text-amber-100 mb-2">أحسنت يا {studentName}! 🎉</h2>
+                                <p className="text-amber-200/90 mb-4">أكملت الدرس «{lastCompletedLesson.lessonTitle}» بنجاح</p>
+                                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold mb-6">
+                                    <Zap size={18} /> +50 نقطة XP
+                                </div>
+                                <button
+                                    onClick={closeCompletionModal}
+                                    className="w-full py-4 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 text-white font-bold hover:from-amber-500 hover:to-orange-500 shadow-lg transition-all flex items-center justify-center gap-2"
+                                >
+                                    <Compass size={18} /> العودة للخريطة
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 {/* Sky Gradient */}
                 <div className="absolute inset-0 bg-gradient-to-b from-sky-900 via-sky-950 to-slate-950" />
                 

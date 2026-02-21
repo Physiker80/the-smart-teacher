@@ -11,6 +11,7 @@ interface LessonGeneratorProps {
     initialGrade?: string;
     initialActivities?: string[];
     initialSubject?: string;
+    initialPart?: string;
 }
 
 interface CapturedImage {
@@ -23,7 +24,7 @@ interface CapturedImage {
 
 type InputMode = 'camera' | 'upload';
 
-export const LessonGenerator: React.FC<LessonGeneratorProps> = ({ onSuccess, onCancel, initialTopic, initialGrade, initialActivities = [], initialSubject }) => {
+export const LessonGenerator: React.FC<LessonGeneratorProps> = ({ onSuccess, onCancel, initialTopic, initialGrade, initialActivities = [], initialSubject, initialPart }) => {
     const [topic, setTopic] = useState(initialTopic || '');
     const [gradeLevel, setGradeLevel] = useState(initialGrade || 'الصف الثالث الابتدائي');
     const [selectedActivities, setSelectedActivities] = useState<string[]>(initialActivities);
@@ -193,6 +194,7 @@ export const LessonGenerator: React.FC<LessonGeneratorProps> = ({ onSuccess, onC
                 capturedImage ? { mimeType: capturedImage.mimeType, data: capturedImage.data } : undefined
             );
             if (initialSubject) plan.subject = initialSubject;
+            if (initialPart) plan.part = initialPart;
             onSuccess(plan);
         } catch (error: any) {
             console.error(error);

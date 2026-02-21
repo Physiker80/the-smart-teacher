@@ -21,6 +21,7 @@ import { PrivateVault } from './components/PrivateVault';
 import { CurriculumAgent } from './components/CurriculumAgent';
 import { StudentOasis } from './components/StudentOasis';
 import { OasisCommandCenter } from './components/OasisCommandCenter';
+import { CreativityStudio, CreativityTab } from './components/CreativityStudio';
 import { fetchLessonPlans, saveLessonPlan } from './services/syncService';
 import { supabase } from './services/supabaseClient';
 
@@ -31,7 +32,8 @@ const App: React.FC = () => {
     const [selectedPlan, setSelectedPlan] = useState<LessonPlan | null>(null);
     const [calendarInitialEvent, setCalendarInitialEvent] = useState<{ title: string; subject?: string; grade?: string; planId?: string } | undefined>(undefined);
     const [currentTheme, setCurrentTheme] = useState<Theme>('default');
-    const [lessonGenProps, setLessonGenProps] = useState<{ initialTopic?: string; initialGrade?: string; initialActivities?: string[]; initialSubject?: string }>({});
+    const [lessonGenProps, setLessonGenProps] = useState<{ initialTopic?: string; initialGrade?: string; initialActivities?: string[]; initialSubject?: string; initialPart?: string }>({});
+    const [creativityStudioInitialTab, setCreativityStudioInitialTab] = useState<CreativityTab | undefined>(undefined);
 
     // Check active session on mount
     useEffect(() => {
@@ -347,9 +349,7 @@ const App: React.FC = () => {
                             setSelectedPlan(plan);
                             setCurrentView('view-lesson');
                         }}
-                        onGamification={() => setCurrentView('gamification')}
-                        onSimulation={() => setCurrentView('simulation')}
-                        onSongs={() => setCurrentView('songs')}
+                        onCreativityStudio={() => { setCreativityStudioInitialTab(undefined); setCurrentView('creativity-studio'); }}
                         onCalendar={() => { setCalendarInitialEvent(undefined); setCurrentView('calendar'); }}
                         onClassManager={() => setCurrentView('class-manager')}
                         onProfile={() => setCurrentView('profile')}
@@ -357,7 +357,6 @@ const App: React.FC = () => {
                         currentTheme={currentTheme}
                         onThemeChange={(theme) => setUser({ ...user, theme })}
                         onStoryWeaver={() => setCurrentView('story-weaver')}
-                        onMelodyStudio={() => setCurrentView('melody-studio')}
                         onPrivateVault={() => setCurrentView('private-vault')}
                         onCurriculumAgent={() => setCurrentView('curriculum-agent')}
                         onStudentOasis={() => setCurrentView('student-oasis')}
@@ -373,6 +372,7 @@ const App: React.FC = () => {
                         initialGrade={lessonGenProps.initialGrade}
                         initialActivities={lessonGenProps.initialActivities}
                         initialSubject={lessonGenProps.initialSubject}
+                        initialPart={lessonGenProps.initialPart}
                     />
                 );
             case 'view-lesson':
@@ -380,9 +380,7 @@ const App: React.FC = () => {
                     <LessonView
                         plan={selectedPlan}
                         onBack={() => setCurrentView('dashboard')}
-                        onGamification={() => setCurrentView('gamification')}
-                        onSimulation={() => setCurrentView('simulation')}
-                        onSongs={() => setCurrentView('songs')}
+                        onCreativityStudio={(tab) => { setCreativityStudioInitialTab(tab); setCurrentView('creativity-studio'); }}
                         onSave={handleSaveLesson}
                         onSchedule={() => {
                             setCalendarInitialEvent({
@@ -459,8 +457,8 @@ const App: React.FC = () => {
                             setSelectedPlan(plan);
                             setCurrentView('view-lesson');
                         }}
-                        onGenerateLesson={(topic, grade, activities, subject) => {
-                            setLessonGenProps({ initialTopic: topic, initialGrade: grade, initialActivities: activities, initialSubject: subject });
+                        onGenerateLesson={(topic, grade, activities, subject, part) => {
+                            setLessonGenProps({ initialTopic: topic, initialGrade: grade, initialActivities: activities, initialSubject: subject, initialPart: part });
                             setCurrentView('create-lesson');
                         }}
                     />
@@ -472,8 +470,8 @@ const App: React.FC = () => {
                     <CurriculumAgent 
                         userId={user?.id}
                         onBack={() => setCurrentView('dashboard')} 
-                        onGenerateLesson={(topic, grade, activities, subject) => {
-                            setLessonGenProps({ initialTopic: topic, initialGrade: grade, initialActivities: activities, initialSubject: subject });
+                        onGenerateLesson={(topic, grade, activities, subject, part) => {
+                            setLessonGenProps({ initialTopic: topic, initialGrade: grade, initialActivities: activities, initialSubject: subject, initialPart: part });
                             setCurrentView('create-lesson');
                         }}
                     />
@@ -492,11 +490,23 @@ const App: React.FC = () => {
                         isTeacherMode={user?.role !== 'طالب'}
                     />
                 );
+            case 'creativity-studio':
+                return (
+                    <CreativityStudio
+                        onBack={() => setCurrentView('dashboard')}
+                        initialTopic={selectedPlan?.topic}
+                        initialGrade={selectedPlan?.grade}
+                        initialSubject={selectedPlan?.subject}
+                        initialTab={creativityStudioInitialTab}
+                    />
+                );
             case 'oasis-command-center':
                 return (
                     <OasisCommandCenter 
                         currentLesson={selectedPlan || undefined}
-                        onBack={() => setCurrentView('dashboard')} 
+                        onBack={() => setCurrentView('dashboard')}
+                        userId={user?.id}
+                        teacherSubject={user?.subject}
                     />
                 );
             default:

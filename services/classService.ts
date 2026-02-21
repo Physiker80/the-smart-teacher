@@ -18,8 +18,9 @@ const mapClassFromDB = (row: any, students: Student[]): ClassRoom => ({
 // Map DB row to Frontend 'Student' object
 const mapStudentFromDB = (enrollment: any, profile: any): Student => ({
     id: profile.id,
-    name: profile.full_name || 'طالب مجهول', // Fallback
-    dob: profile.dob, // Ensure this column exists in DB
+    name: profile.full_name || 'طالب مجهول',
+    registrationCode: profile.registration_code,
+    dob: profile.dob,
     avatar: profile.avatar_url,
     behaviorNotes: enrollment.behavior_notes,
     learningStyle: (profile.learning_style as any) || undefined,
@@ -57,7 +58,7 @@ export const fetchTeacherClasses = async (teacherId: string): Promise<ClassRoom[
                 grades,
                 participation_count,
                 student_id,
-                profiles:student_id (id, full_name, learning_style, dob, parent_contact)
+                profiles:student_id (id, full_name, learning_style, dob, parent_contact, registration_code)
             `)
             .in('class_id', classIds);
 
@@ -157,25 +158,23 @@ export const removeStudentFromClass = async (classId: string, studentId: string)
     if (error) throw error;
 };
 
+/** Generates a unique 6-digit registration code */
+const generateRegistrationCode = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
 export const addStudentToClass = async (classId: string, studentData: Partial<Student>) => {
-    // 1. Create a Profile for the student (Shadow Profile)
-    // We generate a UUID for them.
-    // Note: In a real app, you might want to invite by email.
-    // Here we support "Managed Students" without email.
-    
-    // We let Supabase generate the ID if possible, or we generate one.
-    // If we use 'insert' without ID, Supabase default uuid_generate_v4() should work if set up.
-    // But let's check if we can return the ID.
-    
+    const registrationCode = studentData.registrationCode?.trim() || generateRegistrationCode();
+
     const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .insert({
             full_name: studentData.name,
             role: 'student',
+            registration_code: registrationCode,
             learning_style: studentData.learningStyle,
             dob: studentData.dob,
             parent_contact: studentData.parentContact,
-            // points/level defaults handled by DB
         })
         .select()
         .single();
@@ -190,7 +189,7 @@ export const addStudentToClass = async (classId: string, studentData: Partial<St
             student_id: profile.id,
             grades: [], // Start with empty grades
             participation_count: 0,
-            behavior_notes: ''
+            behavior_notes: studentData.behaviorNotes || ''
         });
 
     if (enrollError) {
@@ -199,5 +198,20 @@ export const addStudentToClass = async (classId: string, studentData: Partial<St
         throw enrollError;
     }
 
-    return { ...studentData, id: profile.id };
+    return { ...studentData, id: profile.id, registrationCode };
+};
+
+/** Enroll an existing student (by profile id) in another class. Used when adding student to all subjects in the same class. */
+export const enrollExistingStudentInClass = async (classId: string, studentId: string, behaviorNotes?: string) => {
+    const { error } = await supabase
+        .from('class_enrollments')
+        .insert({
+            class_id: classId,
+            student_id: studentId,
+            grades: [],
+            participation_count: 0,
+            behavior_notes: behaviorNotes || ''
+        });
+
+    if (error) throw error;
 };

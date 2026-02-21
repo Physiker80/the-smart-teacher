@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../services/supabaseClient';
-import { fetchTeacherClasses, createClass, updateClassDetails, updateStudentEnrollment, deleteClass, removeStudentFromClass, addStudentToClass } from '../services/classService';
+import { fetchTeacherClasses, createClass, updateClassDetails, updateStudentEnrollment, deleteClass, removeStudentFromClass, addStudentToClass, enrollExistingStudentInClass } from '../services/classService';
 import { 
     fetchLearningUnits, createLearningUnit, deleteLearningUnit,
     fetchStudentGroups, createStudentGroup, updateStudentGroup, deleteStudentGroup,
@@ -13,8 +13,9 @@ import {
 import { exportLessonToPDF } from '../services/curriculumPdfService';
 import { uploadResourceFile, getResourceFileAccept, deleteStorageFileByUrl } from '../services/storageService';
 import { ResourceExplorerModal } from './ResourceExplorerModal';
+import { CertificateCreator } from './CertificateCreator';
 import { ClassRoom, Student, StudentGrade, Announcement, LearningUnit, Resource, CalendarEvent, ClassAssessment, LessonPlan, CurriculumBook, CurriculumLesson, KeyVisual, StudentGroup, getCurriculumBookDisplayName } from '../types';
-import { read, utils } from 'xlsx';
+import { read, utils, writeFile } from 'xlsx';
 import {
     ArrowLeft, Plus, X, Save, Trash2, Users, BookOpen, GraduationCap,
     BarChart3, Bell, Eye, Pencil, Search, ChevronLeft, ChevronRight,
@@ -31,7 +32,7 @@ interface ClassManagerProps {
     onNewLesson?: (classId?: string) => void;
     onViewLesson?: (plan: LessonPlan) => void;
     onViewCurricula?: () => void;
-    onGenerateLesson?: (topic: string, grade: string, activities?: string[], subject?: string) => void;
+    onGenerateLesson?: (topic: string, grade: string, activities?: string[], subject?: string, part?: string) => void;
 }
 
 const CLASSES_KEY = 'st_classes';
@@ -55,6 +56,13 @@ const LEARNING_STYLES: { value: Student['learningStyle']; label: string; icon: R
     { value: 'visual', label: 'بصري', icon: <Eye size={14} /> },
     { value: 'auditory', label: 'سمعي', icon: <Ear size={14} /> },
     { value: 'kinesthetic', label: 'حركي', icon: <Move size={14} /> },
+];
+
+/** قائمة افتراضية من 25 اسم طالب للاستخدام السريع */
+const DEFAULT_STUDENT_NAMES = [
+    'محمد', 'أحمد', 'علي', 'حسن', 'خالد', 'عمر', 'يوسف', 'إبراهيم', 'عبدالله', 'حسين',
+    'طارق', 'باسل', 'كريم', 'سامر', 'وائل', 'نور', 'سارة', 'فاطمة', 'مريم', 'هدى',
+    'رنا', 'لينا', 'ياسمين', 'دانا', 'روان',
 ];
 
 const GRADE_TYPES: { value: StudentGrade['type']; label: string }[] = [
@@ -94,7 +102,9 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
     const [showAnnouncement, setShowAnnouncement] = useState(false);
     const [showCopyRoster, setShowCopyRoster] = useState(false);
     const [showAddAssessment, setShowAddAssessment] = useState(false);
+    const [showCertificateModal, setShowCertificateModal] = useState(false);
     const [importStatus, setImportStatus] = useState<string | null>(null);
+    const [addingDefaultStudents, setAddingDefaultStudents] = useState(false);
     
     // Group Management States
     const [showAddGroup, setShowAddGroup] = useState(false);
@@ -108,9 +118,11 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
     const [formClassGrade, setFormClassGrade] = useState('');
     const [formClassSubject, setFormClassSubject] = useState('');
     const [formStudentName, setFormStudentName] = useState('');
+    const [formStudentRegistrationCode, setFormStudentRegistrationCode] = useState('');
     const [formStudentDob, setFormStudentDob] = useState('');
     const [formStudentStyle, setFormStudentStyle] = useState<Student['learningStyle']>('');
     const [formStudentParent, setFormStudentParent] = useState('');
+    const [formStudentNotes, setFormStudentNotes] = useState('');
     const [formGradeTitle, setFormGradeTitle] = useState('');
     const [formGradeScore, setFormGradeScore] = useState('');
     const [formGradeMax, setFormGradeMax] = useState('100');
@@ -178,6 +190,7 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                     const students: Student[] = (enrolls || []).map((e: any) => ({
                         id: e.profiles?.id || 'unknown',
                         name: e.profiles?.full_name || 'طالب مجهول',
+                        registrationCode: e.profiles?.registration_code,
                         dob: e.profiles?.dob,
                         learningStyle: e.profiles?.learning_style,
                         parentContact: e.profiles?.parent_contact,
@@ -555,7 +568,7 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                 if (!error && classesData) {
                     const loaded = await Promise.all(classesData.map(async (c: any) => {
                         const { data: enrolls } = await supabase.from('class_enrollments').select('*, profiles:student_id(*)').eq('class_id', c.id);
-                        const students = (enrolls || []).map((e: any) => ({ id: e.profiles?.id || 'unknown', name: e.profiles?.full_name || 'طالب مجهول', dob: e.profiles?.dob, learningStyle: e.profiles?.learning_style, parentContact: e.profiles?.parent_contact, grades: e.grades || [], participationCount: e.participation_count || 0, behaviorNotes: e.behavior_notes }));
+                        const students = (enrolls || []).map((e: any) => ({ id: e.profiles?.id || 'unknown', name: e.profiles?.full_name || 'طالب مجهول', registrationCode: e.profiles?.registration_code, dob: e.profiles?.dob, learningStyle: e.profiles?.learning_style, parentContact: e.profiles?.parent_contact, grades: e.grades || [], participationCount: e.participation_count || 0, behaviorNotes: e.behavior_notes }));
                         return { id: c.id, name: c.name || c.grade, gradeLevel: c.grade, subject: c.subject, classCode: c.class_code, students, studentGroupId: undefined, announcements: c.announcements || [], assessments: c.assessments || [], color: c.color || 'from-blue-500 to-cyan-500' } as ClassRoom;
                     }));
                     saveClasses(loaded);
@@ -569,45 +582,116 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
 
     const handleAddStudent = async () => {
         if (!formStudentName.trim() || !selectedClassId) return;
-        
+
+        const selectedClass = classes.find(c => c.id === selectedClassId);
+        if (!selectedClass) return;
+
+        // فصول ذات الاسم نفسه = نفس الفصل بمختلف المواد (ضم الطالب لجميع المواد)
+        const siblingClasses = classes.filter(c => c.name === selectedClass.name && c.id !== selectedClassId);
+        const targetClassIds = [selectedClassId, ...siblingClasses.map(c => c.id)];
+
         try {
-            // 1. Create in DB + Enroll
             const newStudentBase: Partial<Student> = {
                 name: formStudentName.trim(),
+                registrationCode: formStudentRegistrationCode.trim() || undefined,
                 dob: formStudentDob || undefined,
                 learningStyle: formStudentStyle || undefined,
                 parentContact: formStudentParent || undefined,
+                behaviorNotes: formStudentNotes.trim() || undefined,
             };
-            
+
             const result = await addStudentToClass(selectedClassId, newStudentBase);
-            // Wait, we need to handle the return type properly. `addStudentToClass` returns { ...studentData, id }
-            // Let's assume result is correct.
+
+            for (const classId of siblingClasses.map(c => c.id)) {
+                await enrollExistingStudentInClass(classId, result.id, formStudentNotes.trim() || undefined);
+            }
 
             const newStudent: Student = {
                 id: result.id,
                 name: result.name!,
+                registrationCode: result.registrationCode,
                 dob: result.dob,
                 learningStyle: result.learningStyle,
                 parentContact: result.parentContact,
                 grades: [],
                 participationCount: 0,
-                behaviorNotes: undefined
+                behaviorNotes: formStudentNotes.trim() || undefined
             };
 
-            // 2. Update Local State
             const updatedClasses = classes.map(c =>
-                c.id === selectedClassId ? { ...c, students: [...c.students, newStudent] } : c
+                targetClassIds.includes(c.id) ? { ...c, students: [...c.students, newStudent] } : c
             );
             saveClasses(updatedClasses);
-            
+
             setShowAddStudent(false);
             setFormStudentName('');
+            setFormStudentRegistrationCode('');
             setFormStudentDob('');
             setFormStudentStyle('');
             setFormStudentParent('');
-        } catch (error) {
+            setFormStudentNotes('');
+
+            const subjectCount = targetClassIds.length;
+            if (result.registrationCode) {
+                navigator.clipboard.writeText(result.registrationCode);
+                alert(`تم إضافة الطالب بنجاح إلى ${subjectCount} مادة! رقم التسجيل: ${result.registrationCode}\n\nتم نسخ الرقم للحافظة. شاركه مع الطالب لإدخاله عند التسجيل.`);
+            } else {
+                alert(`تم إضافة الطالب بنجاح إلى ${subjectCount} مادة!`);
+            }
+        } catch (error: any) {
             console.error("Failed to add student:", error);
-            alert("فشل إضافة الطالب. يرجى المحاولة مرة أخرى.");
+            const msg = error?.message || '';
+            if (msg.includes("registration_code") || msg.includes("PGRST204")) {
+                alert("خطأ في قاعدة البيانات: عمود رقم التسجيل غير موجود.\n\nافتح Supabase → SQL Editor ونفّذ محتويات ملف supabase_add_registration_code.sql ثم أعد المحاولة.");
+            } else {
+                alert("فشل إضافة الطالب. يرجى التأكد من عدم تكرار رقم التسجيل أو المحاولة مرة أخرى.");
+            }
+        }
+    };
+
+    const handleAddDefaultStudents = async () => {
+        if (!selectedClassId) return;
+        const selectedClass = classes.find(c => c.id === selectedClassId);
+        if (!selectedClass) return;
+        if (!window.confirm(`هل تريد إضافة ${DEFAULT_STUDENT_NAMES.length} طالب افتراضي إلى "${selectedClass.name}" وجميع المواد المرتبطة؟`)) return;
+
+        const siblingClasses = classes.filter(c => c.name === selectedClass.name && c.id !== selectedClassId);
+        const targetClassIds = [selectedClassId, ...siblingClasses.map(c => c.id)];
+
+        setAddingDefaultStudents(true);
+        try {
+            let updatedClasses = classes;
+            for (const name of DEFAULT_STUDENT_NAMES) {
+                const newStudentBase: Partial<Student> = { name };
+                const result = await addStudentToClass(selectedClassId, newStudentBase);
+                for (const classId of siblingClasses.map(c => c.id)) {
+                    await enrollExistingStudentInClass(classId, result.id);
+                }
+                const newStudent: Student = {
+                    id: result.id,
+                    name: result.name!,
+                    registrationCode: result.registrationCode,
+                    grades: [],
+                    participationCount: 0,
+                };
+                updatedClasses = updatedClasses.map(c =>
+                    targetClassIds.includes(c.id) ? { ...c, students: [...c.students, newStudent] } : c
+                );
+            }
+            saveClasses(updatedClasses);
+            const subjectCount = targetClassIds.length;
+            alert(`تم إضافة ${DEFAULT_STUDENT_NAMES.length} طالب بنجاح إلى ${subjectCount} مادة!`);
+        } catch (error: any) {
+            console.error("Failed to add default students:", error);
+            const msg = error?.message || '';
+            const isSchemaError = msg.includes("registration_code") || msg.includes("PGRST204");
+            if (isSchemaError) {
+                alert("خطأ في قاعدة البيانات: عمود رقم التسجيل غير موجود.\n\nافتح Supabase → SQL Editor ونفّذ محتويات ملف supabase_add_registration_code.sql ثم أعد المحاولة.");
+            } else {
+                alert("فشل إضافة الطلاب. حاول مرة أخرى.");
+            }
+        } finally {
+            setAddingDefaultStudents(false);
         }
     };
 
@@ -1017,11 +1101,11 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
     const handleExportCsv = () => {
         if (!selectedClass) return;
         const BOM = '\uFEFF';
-        const header = 'الاسم,تاريخ الميلاد,نمط التعلم,تواصل ولي الأمر,عدد الدرجات,المعدل,المشاركات';
+        const header = 'رقم التسجيل,الاسم,تاريخ الميلاد,نمط التعلم,تواصل ولي الأمر,عدد الدرجات,المعدل,المشاركات';
         const rows = selectedClass.students.map(s => {
             const avg = s.grades.length > 0 ? Math.round(s.grades.reduce((sum, g) => sum + (g.score / g.maxScore) * 100, 0) / s.grades.length) : 0;
             const style = LEARNING_STYLES.find(ls => ls.value === s.learningStyle)?.label || '';
-            return `"${s.name}","${s.dob || ''}","${style}","${s.parentContact || ''}",${s.grades.length},${avg}%,${s.participationCount}`;
+            return `"${s.registrationCode || ''}","${s.name}","${s.dob || ''}","${style}","${s.parentContact || ''}",${s.grades.length},${avg}%,${s.participationCount}`;
         });
         const csv = BOM + header + '\n' + rows.join('\n');
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -1033,64 +1117,114 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
         URL.revokeObjectURL(url);
     };
 
-    // --- CSV IMPORT ---
+    // --- EXCEL EXPORT ---
+    const handleExportExcel = () => {
+        if (!selectedClass) return;
+        const rows = selectedClass.students.map(s => {
+            const avg = s.grades.length > 0 ? Math.round(s.grades.reduce((sum, g) => sum + (g.score / g.maxScore) * 100, 0) / s.grades.length) : 0;
+            const style = LEARNING_STYLES.find(ls => ls.value === s.learningStyle)?.label || '';
+            return {
+                'رقم التسجيل': s.registrationCode || '',
+                'الاسم': s.name,
+                'تاريخ الميلاد': s.dob || '',
+                'نمط التعلم': style,
+                'تواصل ولي الأمر': s.parentContact || '',
+                'عدد الدرجات': s.grades.length,
+                'المعدل %': avg,
+                'المشاركات': s.participationCount
+            };
+        });
+        const ws = utils.json_to_sheet(rows);
+        const wb = utils.book_new();
+        utils.book_append_sheet(wb, ws, 'الطلاب');
+        writeFile(wb, `${selectedClass.name}_students.xlsx`, { bookType: 'xlsx', bookSST: true });
+    };
+
+    // --- CSV/EXCEL IMPORT ---
+    const parseRowToStudent = (row: Record<string, any>): Partial<Student> | null => {
+        const name = (row['الاسم'] ?? row['name'] ?? row[1] ?? row[0] ?? '').toString().trim();
+        if (!name) return null;
+        const regCode = (row['رقم التسجيل'] ?? row['registration_code'] ?? '').toString().trim();
+        const dob = (row['تاريخ الميلاد'] ?? row['dob'] ?? row[2] ?? '').toString().trim() || undefined;
+        const styleRaw = (row['نمط التعلم'] ?? row['learning_style'] ?? row[3] ?? '').toString();
+        const style = ['visual', 'auditory', 'kinesthetic'].includes(styleRaw) ? styleRaw as Student['learningStyle']
+            : styleRaw === 'بصري' ? 'visual' : styleRaw === 'سمعي' ? 'auditory' : styleRaw === 'حركي' ? 'kinesthetic' : undefined;
+        const parent = (row['تواصل ولي الأمر'] ?? row['parent_contact'] ?? row[4] ?? '').toString().trim() || undefined;
+        return { name, registrationCode: regCode || undefined, dob, learningStyle: style, parentContact: parent };
+    };
+
     const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!selectedClassId || !e.target.files?.[0]) return;
         const file = e.target.files[0];
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            try {
-                const text = event.target?.result as string;
-                const lines = text.split(/\r?\n/).filter(l => l.trim());
-                if (lines.length < 2) { setImportStatus('الملف فارغ أو لا يحتوي على بيانات'); return; }
+        const isExcel = /\.(xlsx|xls)$/i.test(file.name);
 
-                const newStudents: Student[] = [];
-                setImportStatus('جاري استيراد الطلاب...');
+        const processRows = async (rows: Record<string, any>[]) => {
+            const newStudents: Student[] = [];
+            const targetClass = classes.find(c => c.id === selectedClassId);
+            const siblingClasses = targetClass ? classes.filter(c => c.name === targetClass.name && c.id !== selectedClassId) : [];
+            const allTargetIds = [selectedClassId, ...siblingClasses.map(c => c.id)];
 
-                for (let i = 1; i < lines.length; i++) {
-                    const cols = lines[i].match(/("[^"]*"|[^,]+)/g)?.map(c => c.replace(/^"|"$/g, '').trim()) || [];
-                    const name = cols[0];
-                    if (!name) continue;
-
-                    const studentData: Partial<Student> = {
-                        name,
-                        dob: cols[1] || undefined,
-                        learningStyle: (['visual', 'auditory', 'kinesthetic'].includes(cols[2])
-                            ? cols[2] as Student['learningStyle']
-                            : cols[2] === 'بصري' ? 'visual' : cols[2] === 'سمعي' ? 'auditory' : cols[2] === 'حركي' ? 'kinesthetic' : undefined),
-                        parentContact: cols[3] || undefined
-                    };
-
-                    try {
-                        const result = await addStudentToClass(selectedClassId, studentData);
-                        newStudents.push({
-                            id: result.id, // ID from Supabase
-                            name: result.name!,
-                            dob: result.dob,
-                            learningStyle: result.learningStyle,
-                            parentContact: result.parentContact,
-                            grades: [],
-                            participationCount: 0,
-                        });
-                    } catch (err) {
-                        console.error(`Failed to import student at line ${i}:`, err);
+            setImportStatus('جاري استيراد الطلاب...');
+            for (const row of rows) {
+                const studentData = parseRowToStudent(row);
+                if (!studentData) continue;
+                try {
+                    const result = await addStudentToClass(selectedClassId!, studentData);
+                    for (const cid of siblingClasses.map(c => c.id)) {
+                        await enrollExistingStudentInClass(cid, result.id);
                     }
-                }
-
-                if (newStudents.length === 0) { setImportStatus('لم يتم استيراد أي طالب بنجاح'); return; }
-
-                const updatedClasses = classes.map(c =>
-                    c.id === selectedClassId ? { ...c, students: [...c.students, ...newStudents] } : c
-                );
-                saveClasses(updatedClasses); // Update strictly local state for UI
-                setImportStatus(`تم استيراد ${newStudents.length} طالب بنجاح ✅`);
-                setTimeout(() => setImportStatus(null), 3000);
-            } catch (err) {
-                setImportStatus('حدث خطأ أثناء قراءة الملف');
+                    newStudents.push({ id: result.id, name: result.name!, registrationCode: result.registrationCode, dob: result.dob, learningStyle: result.learningStyle, parentContact: result.parentContact, grades: [], participationCount: 0 });
+                } catch (err) { console.error('Import student error:', err); }
             }
+            if (newStudents.length === 0) { setImportStatus('لم يتم استيراد أي طالب بنجاح'); return; }
+            const updatedClasses = classes.map(c => allTargetIds.includes(c.id) ? { ...c, students: [...c.students, ...newStudents] } : c);
+            saveClasses(updatedClasses);
+            setImportStatus(`تم استيراد ${newStudents.length} طالب إلى ${allTargetIds.length} مادة بنجاح ✅`);
+            setTimeout(() => setImportStatus(null), 3000);
         };
-        reader.readAsText(file);
-        e.target.value = ''; // Reset file input
+
+        if (isExcel) {
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+                try {
+                    const data = ev.target?.result;
+                    if (!data) { setImportStatus('فشل قراءة الملف'); return; }
+                    const wb = read(data, { type: 'array' });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const rows = utils.sheet_to_json<Record<string, any>>(ws);
+                    if (rows.length === 0) { setImportStatus('الملف فارغ'); return; }
+                    await processRows(rows);
+                } catch (err) { setImportStatus('حدث خطأ أثناء قراءة ملف Excel'); }
+            };
+            reader.readAsArrayBuffer(file);
+        } else {
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+                try {
+                    const text = (ev.target?.result as string) || '';
+                    const lines = text.split(/\r?\n/).filter(l => l.trim());
+                    if (lines.length < 2) { setImportStatus('الملف فارغ أو لا يحتوي على بيانات'); return; }
+                    const header = lines[0];
+                    const rows: Record<string, any>[] = [];
+                    for (let i = 1; i < lines.length; i++) {
+                        const cols = lines[i].match(/("[^"]*"|[^,]+)/g)?.map(c => c.replace(/^"|"$/g, '').trim()) || [];
+                        const headers = header.match(/("[^"]*"|[^,]+)/g)?.map(c => c.replace(/^"|"$/g, '').trim()) || [];
+                        const hasReg = headers[0] === 'رقم التسجيل' || headers[0]?.includes('رقم');
+                        const obj: Record<string, any> = {};
+                        headers.forEach((h, idx) => { obj[h] = cols[idx] ?? ''; });
+                        if (!obj['الاسم']) obj['الاسم'] = cols[hasReg ? 1 : 0] ?? cols[0];
+                        if (hasReg && !obj['رقم التسجيل']) obj['رقم التسجيل'] = cols[0];
+                        if (!obj['تاريخ الميلاد']) obj['تاريخ الميلاد'] = cols[hasReg ? 2 : 1];
+                        if (!obj['نمط التعلم']) obj['نمط التعلم'] = cols[hasReg ? 3 : 2];
+                        if (!obj['تواصل ولي الأمر']) obj['تواصل ولي الأمر'] = cols[hasReg ? 4 : 3];
+                        rows.push(obj);
+                    }
+                    await processRows(rows);
+                } catch (err) { setImportStatus('حدث خطأ أثناء قراءة الملف'); }
+            };
+            reader.readAsText(file);
+        }
+        e.target.value = '';
     };
 
     // --- COPY ROSTER FROM ANOTHER CLASS ---
@@ -1175,10 +1309,21 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
         <div>
             <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold text-white">فصولي الدراسية</h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                     <button onClick={() => setView('group-manager')}
                         className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white text-xs font-bold transition-all">
                         <Users size={14} /> إدارة الشعب
+                    </button>
+                    <button onClick={() => {
+                        if (classes.length === 0) {
+                            alert('أنشئ فصلاً أولاً لعرض قائمة الطلاب');
+                            return;
+                        }
+                        setSelectedClassId(classes[0].id);
+                        setView('roster');
+                    }}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]">
+                        <Users size={16} /> قائمة الطلاب
                     </button>
                     <button onClick={() => { setFormSelectedGroupForClass(''); setShowAddClass(true); }}
                         className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all shadow-[0_0_15px_rgba(99,102,241,0.3)]">
@@ -1520,17 +1665,23 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                         <span className="text-sm text-slate-500 font-normal">({selectedClass.students.length})</span>
                     </h2>
                     <div className="flex items-center gap-2 flex-wrap">
+                        {/* Export Excel */}
+                        <button onClick={handleExportExcel} disabled={selectedClass.students.length === 0}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600/15 border border-emerald-500/25 text-emerald-400 text-xs font-bold hover:bg-emerald-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="تحميل Excel">
+                            <Download size={14} /> Excel
+                        </button>
                         {/* Export CSV */}
                         <button onClick={handleExportCsv} disabled={selectedClass.students.length === 0}
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600/15 border border-emerald-500/25 text-emerald-400 text-xs font-bold hover:bg-emerald-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                            title="تصدير CSV">
-                            <Download size={14} /> تصدير
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-600/15 border border-slate-500/25 text-slate-400 text-xs font-bold hover:bg-slate-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="تحميل CSV">
+                            <Download size={14} /> CSV
                         </button>
-                        {/* Import CSV */}
+                        {/* Import CSV/Excel */}
                         <label className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-600/15 border border-cyan-500/25 text-cyan-400 text-xs font-bold hover:bg-cyan-600 hover:text-white transition-all cursor-pointer"
-                            title="استيراد CSV">
+                            title="استيراد CSV أو Excel">
                             <Upload size={14} /> استيراد
-                            <input type="file" accept=".csv,.txt" className="hidden" onChange={handleImportCsv} />
+                            <input type="file" accept=".csv,.txt,.xlsx,.xls" className="hidden" onChange={handleImportCsv} />
                         </label>
                         {/* Copy Roster */}
                         {classes.filter(c => c.id !== selectedClassId && c.students.length > 0).length > 0 && (
@@ -1540,6 +1691,12 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                                 <Copy size={14} /> نسخ من فصل
                             </button>
                         )}
+                        {/* Add 25 Default Students */}
+                        <button onClick={handleAddDefaultStudents} disabled={addingDefaultStudents}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-600/50 border border-slate-500/30 text-slate-300 text-xs font-bold hover:bg-slate-600 hover:text-white transition-all disabled:opacity-50"
+                            title="إضافة 25 طالب افتراضي">
+                            <Users size={14} /> 25 طالب
+                        </button>
                         {/* Add Student */}
                         <button onClick={() => setShowAddStudent(true)}
                             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all shadow-lg">
@@ -1564,9 +1721,24 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                 </div>
 
                 {filteredStudents.length === 0 ? (
-                    <div className="text-center py-12 text-slate-600">
-                        <Users size={40} className="mx-auto mb-3 opacity-50" />
-                        <p>{searchQuery ? 'لا توجد نتائج' : 'لا يوجد طلاب بعد'}</p>
+                    <div className="text-center py-12">
+                        <Users size={48} className="mx-auto mb-4 text-slate-600 opacity-50" />
+                        <p className="text-slate-500 font-bold mb-1">{searchQuery ? 'لا توجد نتائج للبحث' : 'لا يوجد طلاب بعد'}</p>
+                        {!searchQuery && (
+                            <p className="text-slate-600 text-sm mb-6">أضف طالباً واحداً أو استخدم القائمة الافتراضية لتعبئة الفصل بسرعة</p>
+                        )}
+                        {!searchQuery && (
+                            <div className="flex flex-wrap gap-3 justify-center">
+                                <button onClick={() => setShowAddStudent(true)}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all shadow-lg">
+                                    <UserPlus size={18} /> إضافة طالب
+                                </button>
+                                <button onClick={handleAddDefaultStudents} disabled={addingDefaultStudents}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-600 hover:bg-slate-500 text-white text-sm font-bold transition-all disabled:opacity-50 border border-slate-500/50">
+                                    <Users size={18} /> إضافة 25 طالب افتراضي
+                                </button>
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <div className="space-y-2">
@@ -1586,7 +1758,10 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                                     {/* Info */}
                                     <div className="flex-1 min-w-0">
                                         <h4 className="font-bold text-white text-sm group-hover:text-blue-400 transition-colors truncate">{student.name}</h4>
-                                        <div className="flex items-center gap-3 text-[10px] text-slate-500 mt-0.5">
+                                        <div className="flex items-center gap-3 text-[10px] text-slate-500 mt-0.5 flex-wrap">
+                                            {student.registrationCode && (
+                                                <span className="font-mono text-amber-400/90">رقم: {student.registrationCode}</span>
+                                            )}
                                             {styleInfo && (
                                                 <span className="flex items-center gap-1">{styleInfo.icon} {styleInfo.label}</span>
                                             )}
@@ -1630,14 +1805,26 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                         <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold text-2xl flex-none">
                             {selectedStudent.name.charAt(0)}
                         </div>
-                        <div>
+                        <div className="flex-1">
                             <h2 className="text-xl font-bold text-white">{selectedStudent.name}</h2>
-                            <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
+                            <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
+                                {selectedStudent.registrationCode && (
+                                    <span className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 rounded px-2 py-0.5 font-mono text-amber-400">
+                                        رقم التسجيل: {selectedStudent.registrationCode}
+                                        <button onClick={() => { navigator.clipboard.writeText(selectedStudent.registrationCode!); alert('تم نسخ رقم التسجيل'); }} className="p-0.5 hover:bg-amber-500/20 rounded"><Copy size={10} /></button>
+                                    </span>
+                                )}
                                 {selectedStudent.dob && <span>📅 {selectedStudent.dob}</span>}
                                 {styleInfo && <span className="flex items-center gap-1">{styleInfo.icon} {styleInfo.label}</span>}
                                 {selectedStudent.parentContact && <span>📞 {selectedStudent.parentContact}</span>}
                             </div>
                         </div>
+                        <button
+                            onClick={() => setShowCertificateModal(true)}
+                            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600/20 border border-amber-500/30 text-amber-400 hover:bg-amber-500/30 font-bold text-sm"
+                        >
+                            <Award size={18} /> شهادة إبداع
+                        </button>
                     </div>
                 </div>
 
@@ -2207,7 +2394,7 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         const acts = selectedCurriculumActivities[lessonKey] ?? lesson.activities;
-                                        onGenerateLesson(lesson.lessonTitle, book.bookMetadata?.grade || '', acts, book.bookMetadata?.subject);
+                                        onGenerateLesson(lesson.lessonTitle, book.bookMetadata?.grade || '', acts, book.bookMetadata?.subject, book.bookMetadata?.part);
                                     }}
                                     className="flex-1 py-3 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-bold text-sm flex items-center justify-center gap-2"
                                     title={selectedCurriculumActivities[lessonKey]?.length ? `توليد درس بـ ${selectedCurriculumActivities[lessonKey].length} نشاط` : 'توليد درس بكل الأنشطة'}
@@ -2554,30 +2741,63 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
 
             {/* Add Student Modal */}
             {renderModal(showAddStudent, () => setShowAddStudent(false), 'إضافة طالب جديد', <>
-                <div className="text-center p-4">
-                    <p className="text-slate-400 text-sm mb-4">
-                        لإضافة طلاب إلى هذا الفصل، شارك معهم كود الفصل أدناه. <br/>
-                        عند تسجيلهم في المنصة، سيطلب منهم إدخال هذا الكود للانضمام تلقائياً.
-                    </p>
-                    
-                    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 flex items-center justify-between gap-3 mb-4">
-                        <code className="text-2xl font-mono font-bold text-emerald-400 tracking-wider">
-                            {selectedClass?.classCode || 'Generating...'}
-                        </code>
-                        <button 
-                            onClick={() => {
-                                navigator.clipboard.writeText(selectedClass?.classCode || '');
-                                alert('تم نسخ الكود!');
-                            }}
-                            className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-white transition-all"
-                            title="نسخ الكود"
-                        >
-                            <Copy size={20} />
-                        </button>
+                {classes.length > 1 && selectedClassId && (
+                    <div className="mb-4">
+                        <label className={labelClass}>الفصل المستهدف</label>
+                        <select value={selectedClassId} onChange={e => setSelectedClassId(e.target.value)} className={inputClass} dir="rtl">
+                            {classes.map(c => (
+                                <option key={c.id} value={c.id}>{c.name} {c.subject ? `- ${c.subject}` : ''} ({c.students.length} طالب)</option>
+                            ))}
+                        </select>
+                        {selectedClass && (() => {
+                            const siblings = classes.filter(c => c.name === selectedClass.name);
+                            if (siblings.length > 1) {
+                                return (
+                                    <p className="text-amber-400/90 text-xs mt-2 flex items-center gap-1">
+                                        <Info size={12} /> سيُضاف الطالب تلقائياً إلى جميع المواد ({siblings.length} مواد): {siblings.map(c => c.subject || c.name).join('، ')}
+                                    </p>
+                                );
+                            }
+                            return null;
+                        })()}
                     </div>
-
-                    <div className="text-xs text-slate-500">
-                        ملاحظة: الطلاب الذين ينضمون سيظهرون في القائمة تلقائياً.
+                )}
+                <p className="text-slate-400 text-xs mb-4">
+                    أضف طالباً يدوياً. سيتم توليد رقم تسجيل تلقائياً إن لم تُدخله. شارك الرقم مع الطالب لإدخاله عند التسجيل.
+                </p>
+                <div className="space-y-3">
+                    <div><label className={labelClass}>اسم الطالب *</label><input type="text" value={formStudentName} onChange={e => setFormStudentName(e.target.value)} placeholder="محمد أحمد" className={inputClass} dir="rtl" /></div>
+                    <div>
+                        <label className={labelClass}>رقم التسجيل (اختياري)</label>
+                        <input type="text" value={formStudentRegistrationCode} onChange={e => setFormStudentRegistrationCode(e.target.value)} placeholder="اتركه فارغاً للتوليد التلقائي" className={inputClass} dir="ltr" />
+                        <p className="text-[10px] text-slate-500 mt-1">الرقم الذي يدخله الطالب عند التسجيل للانضمام للفصل</p>
+                    </div>
+                    <div><label className={labelClass}>تاريخ الميلاد</label><input type="date" value={formStudentDob} onChange={e => setFormStudentDob(e.target.value)} className={inputClass} /></div>
+                    <div>
+                        <label className={labelClass}>نمط التعلم</label>
+                        <div className="flex gap-2 flex-wrap">
+                            {LEARNING_STYLES.map(ls => (
+                                <button key={ls.value} type="button" onClick={() => setFormStudentStyle(ls.value)}
+                                    className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all flex items-center gap-1 ${formStudentStyle === ls.value ? 'bg-blue-500/20 border-blue-500/50 text-blue-300' : 'bg-slate-800 border-slate-700 text-slate-500'}`}>
+                                    {ls.icon} {ls.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div><label className={labelClass}>تواصل ولي الأمر</label><input type="text" value={formStudentParent} onChange={e => setFormStudentParent(e.target.value)} placeholder="هاتف أو بريد إلكتروني" className={inputClass} dir="rtl" /></div>
+                    <div>
+                        <label className={labelClass}>ملاحظات</label>
+                        <textarea value={formStudentNotes} onChange={e => setFormStudentNotes(e.target.value)} placeholder="ملاحظات عن الطالب أو ولي الأمر..." className={`${inputClass} resize-none h-20`} dir="rtl" rows={3} />
+                    </div>
+                </div>
+                <div className="flex gap-3 pt-4">
+                    <button onClick={handleAddStudent} disabled={!formStudentName.trim()} className={btnPrimary}><UserPlus size={16} /> إضافة الطالب</button>
+                </div>
+                <div className="mt-4 p-3 rounded-xl bg-slate-800/50 border border-slate-700">
+                    <p className="text-slate-400 text-xs font-bold mb-2">أو انضم عبر كود الفصل:</p>
+                    <div className="flex items-center justify-between gap-2">
+                        <code className="text-sm font-mono text-emerald-400">{selectedClass?.classCode || '—'}</code>
+                        <button onClick={() => { navigator.clipboard.writeText(selectedClass?.classCode || ''); alert('تم نسخ كود الفصل'); }} className="p-1.5 rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-white"><Copy size={14} /></button>
                     </div>
                 </div>
             </>)}
@@ -2675,8 +2895,8 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                 <ResourceExplorerModal
                     resource={resourceForExplorer}
                     onClose={() => { setShowResourceExplorer(false); setResourceForExplorer(null); }}
-                    onGenerate={(topic, grade, pagesOrTitles, subject) => {
-                        if (onGenerateLesson) onGenerateLesson(topic, grade, pagesOrTitles, subject ?? selectedClass?.subject);
+                    onGenerate={(topic, grade, pagesOrTitles, subject, part) => {
+                        if (onGenerateLesson) onGenerateLesson(topic, grade, pagesOrTitles, subject ?? selectedClass?.subject, part);
                         setShowResourceExplorer(false);
                         setResourceForExplorer(null);
                     }}
@@ -2780,6 +3000,16 @@ export const ClassManager: React.FC<ClassManagerProps> = ({ onBack, onNewLesson,
                     ))}
                 </div>
             </>)}
+
+            {renderModal(showCertificateModal, () => setShowCertificateModal(false), 'شهادة إبداع للطالب المتميز', (
+                <div className="p-5">
+                    <CertificateCreator
+                        studentName={selectedStudent?.name || ''}
+                        lessonTopic={selectedStudent?.grades?.[0]?.title || ''}
+                        onClose={() => setShowCertificateModal(false)}
+                    />
+                </div>
+            ))}
 
             <style>{`
                 @keyframes slideUp {

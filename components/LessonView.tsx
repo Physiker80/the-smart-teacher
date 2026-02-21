@@ -75,17 +75,20 @@ const downloadTextFile = (content: string, filename: string) => {
     FileSaver.saveAs(blob, filename);
 };
 
+type CreativityTab = 'simulation' | 'melody' | 'songs' | 'gamification';
+
 interface LessonViewProps {
     plan: LessonPlan;
     onBack: () => void;
     onGamification?: () => void;
     onSimulation?: () => void;
     onSongs?: () => void;
+    onCreativityStudio?: (initialTab?: CreativityTab) => void;
     onSchedule?: () => void;
     onSave?: (plan: LessonPlan) => void;
 }
 
-export const LessonView: React.FC<LessonViewProps> = ({ plan, onBack, onGamification, onSimulation, onSongs, onSchedule, onSave }) => {
+export const LessonView: React.FC<LessonViewProps> = ({ plan, onBack, onGamification, onSimulation, onSongs, onCreativityStudio, onSchedule, onSave }) => {
     // --- State ---
     const [lessonState, setLessonState] = useState<LessonPlan>({
         ...plan,
@@ -1628,15 +1631,15 @@ export const LessonView: React.FC<LessonViewProps> = ({ plan, onBack, onGamifica
 
                     <div className="h-24 flex flex-col md:flex-row items-center justify-center gap-4 border-t border-slate-800/50 pt-4 mt-2">
                         <div className="flex gap-4">
-                            <button onClick={onSimulation} className="px-6 py-3 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white transition-all shadow-lg hover:shadow-blue-500/20 flex items-center gap-2 group">
+                            <button onClick={() => onCreativityStudio ? onCreativityStudio('simulation') : onSimulation?.()} className="px-6 py-3 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white transition-all shadow-lg hover:shadow-blue-500/20 flex items-center gap-2 group">
                                 <FlaskConical size={18} className="group-hover:rotate-12 transition-transform" />
                                 <span>المحاكاة التفاعلية</span>
                             </button>
-                            <button onClick={onGamification} className="px-6 py-3 rounded-xl border border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500 hover:text-white transition-all shadow-lg hover:shadow-purple-500/20 flex items-center gap-2 group">
+                            <button onClick={() => onCreativityStudio ? onCreativityStudio('gamification') : onGamification?.()} className="px-6 py-3 rounded-xl border border-purple-500/30 bg-purple-500/10 text-purple-400 hover:bg-purple-500 hover:text-white transition-all shadow-lg hover:shadow-purple-500/20 flex items-center gap-2 group">
                                 <Gamepad2 size={18} className="group-hover:scale-110 transition-transform" />
                                 <span>التلعيب والاختبارات</span>
                             </button>
-                            <button onClick={onSongs} className="px-6 py-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white transition-all shadow-lg hover:shadow-rose-500/20 flex items-center gap-2 group">
+                            <button onClick={() => onCreativityStudio ? onCreativityStudio('songs') : onSongs?.()} className="px-6 py-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white transition-all shadow-lg hover:shadow-rose-500/20 flex items-center gap-2 group">
                                 <Music size={18} className="group-hover:animate-bounce" />
                                 <span>الأناشيد والقصص</span>
                             </button>

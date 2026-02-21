@@ -2,7 +2,7 @@
 import { supabase } from './supabaseClient';
 import { 
   LearningUnit, StudentGroup, LessonPlan, CurriculumBook, 
-  Resource, CalendarEvent, JournalEntry, StudentWork 
+  Resource, CalendarEvent, JournalEntry, StudentWork, Worksheet 
 } from '../types';
 
 // --- LEARNING UNITS ---
@@ -139,6 +139,36 @@ export const createResource = async (res: Partial<Resource>) => {
   if (error) throw error;
   return data;
 };
+
+// --- WORKSHEETS & CERTIFICATES (مزامنة مع قاعدة البيانات) ---
+export const saveWorksheet = async (worksheet: Worksheet, lessonId?: string, lessonTopic?: string) => {
+  const res = await createResource({
+    title: worksheet.title,
+    type: 'worksheet',
+    tags: [worksheet.grade, worksheet.topic, ...(lessonId ? [lessonId] : [])],
+    data: { ...worksheet, lessonId, lessonTopic }
+  });
+  return res;
+};
+
+export const saveCertificate = async (opts: { studentName: string; lessonTopic: string; imageUrl: string; style?: string }) => {
+  const res = await createResource({
+    title: `شهادة إبداع - ${opts.studentName}`,
+    type: 'certificate',
+    tags: [opts.studentName, opts.lessonTopic, 'شهادة إبداع'],
+    url: opts.imageUrl.startsWith('data:') ? undefined : opts.imageUrl,
+    data: opts
+  });
+  return res;
+};
+
+export const fetchWorksheets = async (lessonId?: string) => {
+  const res = await fetchResourcesByType('worksheet');
+  if (lessonId) return res.filter((r: Resource) => (r.data as any)?.lessonId === lessonId);
+  return res;
+};
+
+export const fetchCertificates = async () => fetchResourcesByType('certificate');
 
 export const updateResource = async (id: string, updates: Partial<Pick<Resource, 'title' | 'type' | 'url' | 'tags' | 'classId'>> & { data?: any }) => {
   const { error } = await supabase

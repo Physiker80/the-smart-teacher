@@ -26,7 +26,7 @@ const MATERIAL_CONFIG: Record<string, { label: string; bg: string; border: strin
 interface CurriculumAgentProps {
     userId?: string;
     onBack: () => void;
-    onGenerateLesson?: (topic: string, grade: string, activities?: string[], subject?: string) => void;
+    onGenerateLesson?: (topic: string, grade: string, activities?: string[], subject?: string, part?: string) => void;
 }
 
 // ... existing code ...
@@ -183,7 +183,7 @@ export const CurriculumAgent: React.FC<CurriculumAgentProps> = ({ userId, onBack
     const handleGenerateForLesson = (lesson: CurriculumLesson, index: number) => {
         if (onGenerateLesson) {
              const acts = selectedActivities[index] || lesson.activities;
-             onGenerateLesson(lesson.lessonTitle, result?.bookMetadata.grade || '', acts, result?.bookMetadata?.subject);
+             onGenerateLesson(lesson.lessonTitle, result?.bookMetadata.grade || '', acts, result?.bookMetadata?.subject, result?.bookMetadata?.part);
         } else {
             alert('خاصية توليد الدروس غير متوفرة في هذا الوضع');
         }

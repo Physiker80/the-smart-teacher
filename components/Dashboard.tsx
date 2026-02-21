@@ -13,9 +13,7 @@ interface DashboardProps {
     recentPlans: LessonPlan[];
     onNewLesson: () => void;
     onViewLesson: (plan: LessonPlan) => void;
-    onGamification: () => void;
-    onSimulation: () => void;
-    onSongs: () => void;
+    onCreativityStudio: () => void;
     onCalendar: () => void;
     onClassManager: () => void;
     onProfile: () => void;
@@ -23,14 +21,13 @@ interface DashboardProps {
     currentTheme: Theme;
     onThemeChange: (theme: Theme) => void;
     onStoryWeaver: () => void;
-    onMelodyStudio: () => void;
     onPrivateVault: () => void;
     onCurriculumAgent: () => void;
     onStudentOasis: () => void;
     onOasisCommandCenter: () => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, recentPlans, onNewLesson, onViewLesson, onGamification, onSimulation, onSongs, onCalendar, onClassManager, onProfile, onLogout, currentTheme, onThemeChange, onStoryWeaver, onMelodyStudio, onPrivateVault, onCurriculumAgent, onStudentOasis, onOasisCommandCenter }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, recentPlans, onNewLesson, onViewLesson, onCreativityStudio, onCalendar, onClassManager, onProfile, onLogout, currentTheme, onThemeChange, onStoryWeaver, onPrivateVault, onCurriculumAgent, onStudentOasis, onOasisCommandCenter }) => {
     // Default stats if not present
     const stats = user.stats || {
         level: 12,
@@ -279,95 +276,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, recentPlans, onNewLe
                         </div>
                     </button>
 
-                    {/* Module 4: Interactive Simulation */}
+                    {/* Module 4: استوديو الإبداع التربوي (محاكاة • ألحان • أغاني • تلعيب) */}
                     <button
-                        onClick={onSimulation}
-                        className="group relative h-56 bg-gradient-to-br from-purple-950/40 via-slate-900/60 to-slate-900/40 backdrop-blur-sm border border-purple-500/20 rounded-2xl p-7 text-right overflow-hidden transition-all duration-300 hover:scale-[1.03] hover:border-purple-500/60 hover:shadow-[0_8px_40px_rgba(168,85,247,0.15)]"
+                        onClick={onCreativityStudio}
+                        className="group relative h-56 md:col-span-2 bg-gradient-to-br from-purple-950/40 via-pink-950/30 to-emerald-950/30 backdrop-blur-sm border border-purple-500/20 rounded-2xl p-7 text-right overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:border-purple-500/50 hover:shadow-[0_8px_40px_rgba(168,85,247,0.2)]"
                     >
                         <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-purple-500/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div className="absolute -right-8 -top-8 w-40 h-40 bg-purple-500/8 rounded-full blur-3xl group-hover:bg-purple-500/15 transition-all duration-500"></div>
-                        <div className="absolute -left-4 -bottom-4 w-24 h-24 bg-purple-400/5 rounded-full blur-2xl group-hover:bg-purple-400/10 transition-all duration-500"></div>
+                        <div className="absolute -right-8 -top-8 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl group-hover:bg-purple-500/20 transition-all duration-500"></div>
+                        <div className="absolute -left-4 -bottom-4 w-32 h-32 bg-pink-500/5 rounded-full blur-2xl group-hover:bg-pink-500/10 transition-all duration-500"></div>
+                        <div className="absolute right-1/2 bottom-4 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition-all duration-500"></div>
 
-                        <div className="relative z-10 flex flex-col h-full justify-between">
-                            <div className="flex items-start justify-between">
-                                <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-purple-500/25 group-hover:shadow-purple-500/40 transition-all duration-300">
-                                    <Beaker size={26} />
+                        <div className="relative z-10 flex flex-col md:flex-row h-full justify-between items-start md:items-center gap-4">
+                            <div className="flex items-center gap-4">
+                                <div className="w-16 h-16 bg-gradient-to-br from-purple-500 via-pink-500 to-emerald-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-purple-500/30 group-hover:shadow-purple-500/50 group-hover:scale-110 transition-all duration-300">
+                                    <Sparkles size={28} />
                                 </div>
-                                <span className="px-2.5 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300">تجربة</span>
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-black text-white mb-1.5 group-hover:text-purple-400 transition-colors">محاكاة تفاعلية</h3>
-                                <p className="text-xs text-slate-400 leading-relaxed">تجارب افتراضية تفاعلية لتعزيز الفهم العلمي.</p>
-                            </div>
-                        </div>
-                    </button>
-
-                    {/* Module 5: Melody Studio */}
-                    <button
-                        onClick={onMelodyStudio}
-                        className="group relative h-56 bg-gradient-to-br from-pink-950/40 via-slate-900/60 to-slate-900/40 backdrop-blur-sm border border-pink-500/20 rounded-2xl p-7 text-right overflow-hidden transition-all duration-300 hover:scale-[1.03] hover:border-pink-500/60 hover:shadow-[0_8px_40px_rgba(236,72,153,0.15)]"
-                    >
-                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-pink-500/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div className="absolute -right-8 -top-8 w-40 h-40 bg-pink-500/8 rounded-full blur-3xl group-hover:bg-pink-500/15 transition-all duration-500"></div>
-                        <div className="absolute -left-4 -bottom-4 w-24 h-24 bg-pink-400/5 rounded-full blur-2xl group-hover:bg-pink-400/10 transition-all duration-500"></div>
-
-                        <div className="relative z-10 flex flex-col h-full justify-between">
-                            <div className="flex items-start justify-between">
-                                <div className="w-14 h-14 bg-gradient-to-br from-pink-500 to-pink-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-pink-500/25 group-hover:shadow-pink-500/40 transition-all duration-300">
-                                    <Music size={26} />
+                                <div>
+                                    <h3 className="text-2xl font-black text-white mb-1 group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-purple-300 group-hover:via-pink-300 group-hover:to-emerald-300 transition-colors">استوديو الإبداع التربوي</h3>
+                                    <p className="text-sm text-slate-400 leading-relaxed">محاكاة تفاعلية • استوديو الألحان • أغاني وقصص • التلعيب التعليمي — في مكان واحد</p>
                                 </div>
-                                <span className="px-2.5 py-1 rounded-full bg-pink-500/10 border border-pink-500/20 text-pink-400 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300">جديد</span>
                             </div>
-                            <div>
-                                <h3 className="text-xl font-black text-white mb-1.5 group-hover:text-pink-400 transition-colors">استوديو الألحان</h3>
-                                <p className="text-xs text-slate-400 leading-relaxed">تأليف أناشيد تعليمية مع ألحان وكاراوكي تفاعلي.</p>
-                            </div>
-                        </div>
-                    </button>
-
-                    {/* Module 6: Songs & Stories */}
-                    <button
-                        onClick={onSongs}
-                        className="group relative h-56 bg-gradient-to-br from-pink-950/40 via-slate-900/60 to-slate-900/40 backdrop-blur-sm border border-pink-500/20 rounded-2xl p-7 text-right overflow-hidden transition-all duration-300 hover:scale-[1.03] hover:border-pink-500/60 hover:shadow-[0_8px_40px_rgba(236,72,153,0.15)]"
-                    >
-                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-pink-500/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div className="absolute -right-8 -top-8 w-40 h-40 bg-pink-500/8 rounded-full blur-3xl group-hover:bg-pink-500/15 transition-all duration-500"></div>
-                        <div className="absolute -left-4 -bottom-4 w-24 h-24 bg-pink-400/5 rounded-full blur-2xl group-hover:bg-pink-400/10 transition-all duration-500"></div>
-
-                        <div className="relative z-10 flex flex-col h-full justify-between">
-                            <div className="flex items-start justify-between">
-                                <div className="w-14 h-14 bg-gradient-to-br from-pink-500 to-pink-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-pink-500/25 group-hover:shadow-pink-500/40 transition-all duration-300">
-                                    <Music size={26} />
-                                </div>
-                                <span className="px-2.5 py-1 rounded-full bg-pink-500/10 border border-pink-500/20 text-pink-400 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300">استمع</span>
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-black text-white mb-1.5 group-hover:text-pink-400 transition-colors">أغاني وقصص</h3>
-                                <p className="text-xs text-slate-400 leading-relaxed">أناشيد تعليمية وقصص مشوقة لتعزيز التعلم والمتعة.</p>
-                            </div>
-                        </div>
-                    </button>
-
-                    {/* Module 6: Gamification */}
-                    <button
-                        onClick={onGamification}
-                        className="group relative h-56 bg-gradient-to-br from-emerald-950/40 via-slate-900/60 to-slate-900/40 backdrop-blur-sm border border-emerald-500/20 rounded-2xl p-7 text-right overflow-hidden transition-all duration-300 hover:scale-[1.03] hover:border-emerald-500/60 hover:shadow-[0_8px_40px_rgba(16,185,129,0.15)]"
-                    >
-                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-emerald-500/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <div className="absolute -right-8 -top-8 w-40 h-40 bg-emerald-500/8 rounded-full blur-3xl group-hover:bg-emerald-500/15 transition-all duration-500"></div>
-                        <div className="absolute -left-4 -bottom-4 w-24 h-24 bg-emerald-400/5 rounded-full blur-2xl group-hover:bg-emerald-400/10 transition-all duration-500"></div>
-
-                        <div className="relative z-10 flex flex-col h-full justify-between">
-                            <div className="flex items-start justify-between">
-                                <div className="w-14 h-14 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/25 group-hover:shadow-emerald-500/40 transition-all duration-300">
-                                    <PlayCircle size={26} />
-                                </div>
-                                <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300">العب</span>
-                            </div>
-                            <div>
-                                <h3 className="text-xl font-black text-white mb-1.5 group-hover:text-emerald-400 transition-colors">التلعيب التعليمي</h3>
-                                <p className="text-xs text-slate-400 leading-relaxed">توليد سيناريوهات وألعاب تعليمية ممتعة للطلاب.</p>
-                            </div>
+                            <span className="px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center gap-2">
+                                <Beaker size={12} /> <Music size={12} /> <PlayCircle size={12} /> افتح
+                            </span>
                         </div>
                     </button>
 

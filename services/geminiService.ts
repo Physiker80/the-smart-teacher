@@ -2,7 +2,7 @@
 /// <reference types="vite/client" />
 import { GoogleGenAI, Type, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { SYSTEM_PROMPT, LESSON_PLAN_SCHEMA, GAME_SCHEMA, CURRICULUM_AGENT_PROMPT, CURRICULUM_SCHEMA } from "../constants";
-import { LessonPlan, SlideContent, GameScenario, SongItem, StoryItem, QuizQuestion, Flashcard, PodcastScript, InfographicSection, VideoScriptScene, TokenUsageRecord, CurriculumBook } from "../types";
+import { LessonPlan, SlideContent, GameScenario, SongItem, StoryItem, QuizQuestion, Flashcard, PodcastScript, InfographicSection, VideoScriptScene, TokenUsageRecord, CurriculumBook, Worksheet, WorksheetItem } from "../types";
 
 /**
  * Helper to track token usage and cost
@@ -358,42 +358,165 @@ export const generateGame = async (topic: string, gradeLevel: string, theme: str
     }
 };
 
+/** توليد صورة عبر Gemini/Imagen — يُستخدم داخلياً */
+const generateImageViaGemini = async (prompt: string, aspectRatio: string = '16:9'): Promise<string | null> => {
+    if (!apiKey) return null;
+
+    // 1. Imagen API (مستقر ومُوثّق)
+    const imagenModels = ['imagen-4.0-generate-001', 'imagen-3.0-generate-002', 'imagen-3.0-generate-001'];
+    for (const model of imagenModels) {
+        try {
+            const response = await ai.models.generateImages({
+                model,
+                prompt: prompt.substring(0, 1000),
+                config: { numberOfImages: 1, aspectRatio }
+            });
+            const img = response.generatedImages?.[0]?.image;
+            if (img?.imageBytes) {
+                const mime = img.mimeType || 'image/png';
+                return `data:${mime};base64,${img.imageBytes}`;
+            }
+        } catch (e: any) {
+            console.warn(`Imagen ${model} failed:`, e?.message);
+        }
+    }
+
+    // 2. Gemini Nano Banana (generateContent + responseModalities)
+    try {
+        const response = await ai.models.generateContent({
+            model: 'models/gemini-2.5-flash-image',
+            contents: [{ parts: [{ text: prompt.substring(0, 800) }] }],
+            config: {
+                responseModalities: ['text', 'image'],
+                imageConfig: { aspectRatio }
+            }
+        });
+        const parts = response.candidates?.[0]?.content?.parts || [];
+        for (const part of parts) {
+            const p = part as any;
+            const inlineData = p.inlineData || p.inline_data;
+            if (inlineData?.data) {
+                const mime = inlineData.mimeType || inlineData.mime_type || 'image/png';
+                return `data:${mime};base64,${inlineData.data}`;
+            }
+        }
+    } catch (e: any) {
+        console.warn("Gemini image gen failed:", e?.message);
+    }
+    return null;
+};
+
 export const generateSlideImage = async (description: string): Promise<string | null> => {
     const safeDesc = (description || '').trim();
     if (!safeDesc) return "/fallback-slide.svg";
 
-    // 1. PRIMARY: Pollinations.ai (Free, no API key, works reliably)
+    const finalPrompt = `High quality, 3D Pixar style illustration. ${safeDesc.substring(0, 600)}. Bright colors, soft lighting, cute characters, educational context, detailed.`;
+    const geminiResult = await generateImageViaGemini(finalPrompt, '16:9');
+    if (geminiResult) return geminiResult;
+
+    // Fallback: Pollinations.ai
     try {
-        const promptText = safeDesc.length > 400 ? safeDesc.substring(0, 400) : safeDesc;
-        const fullPrompt = `${promptText}. 3D Disney Pixar style, cute characters, bright colors, educational illustration`;
-        const encoded = encodeURIComponent(fullPrompt);
+        const encoded = encodeURIComponent(`${safeDesc.substring(0, 400)}. 3D Disney Pixar style, cute characters, bright colors`);
         const seed = Math.floor(Math.random() * 1000000);
         return `https://image.pollinations.ai/prompt/${encoded}?width=1024&height=576&seed=${seed}&nologo=true&model=flux`;
-    } catch (e1) {
-        console.warn("Pollinations failed:", e1);
+    } catch {
+        return "/fallback-slide.svg";
     }
+};
 
-    // 2. FALLBACK: Gemini (requires API key with image gen access)
+/** أنماط شهادة الإبداع */
+export type CertificateStyle = 'disney' | 'mickey' | 'pixar';
+
+const CERTIFICATE_STYLE_PROMPTS: Record<Exclude<CertificateStyle, 'custom'>, string> = {
+    disney: 'Magical Disney-style award certificate, golden ornate frame, blue and gold palette, sparkling stars and fairy dust, royal castle silhouette, cinematic lighting, dreamy atmosphere, child-friendly',
+    mickey: 'Classic Mickey Mouse style award certificate, red yellow and black colors, playful rounded shapes, retro cartoon charm, fun confetti and celebration, certificate of achievement, cheerful and nostalgic, child-friendly',
+    pixar: 'Pixar 3D style award certificate, Luxo ball lamp aesthetic, vibrant modern colors, soft studio lighting, rounded 3D ornamental border, sleek elegant design, certificate of creativity, premium quality render, child-friendly',
+};
+
+const THEME_VISUAL_HINTS: Record<string, string> = {
+    'ماء': 'cute smiling water drop characters, blue waves, sparkling ocean, friendly fish, bubbles, water theme',
+    'الماء': 'cute smiling water drop characters, blue waves, sparkling ocean, friendly fish, bubbles',
+    'سر الحياة': 'cute water and life characters, blue and green, nature, sparkles',
+    'نبات': 'cute flower characters, green leaves, sun, butterflies, garden',
+    'حيوان': 'cute animal characters, forest, friendly creatures, nature',
+    'رياضيات': 'friendly number characters, shapes, stars, playful math symbols',
+    'علوم': 'friendly science characters, lab, planets, discovery theme',
+    'قراءة': 'cute book characters, letters, library, magical books',
+    'لغة': 'cute letter characters, books, alphabet, reading',
+    'جغرافيا': 'globe, mountains, map, adventure theme',
+    'تاريخ': 'ancient scrolls, treasure, discovery, adventure',
+};
+
+const getThemeVisualHint = (topic: string): string => {
+    const t = topic || '';
+    const entries = Object.entries(THEME_VISUAL_HINTS).sort((a, b) => b[0].length - a[0].length);
+    for (const [key, hint] of entries) {
+        if (t.includes(key)) return hint;
+    }
+    return 'cute friendly characters, stars, sparkles, educational theme';
+};
+
+/**
+ * توليد برومبت احترافي لشهادة إبداع عبر الذكاء الاصطناعي
+ */
+export const generateCertificatePrompt = async (studentName: string, lessonTopic: string): Promise<string> => {
     try {
-            // Enhance prompt for Nano Banana (Gemini 2.5 Flash Image)
-            // It prefers concise, descriptive prompts for best results.
-            const enhancedPrompt = safeDesc.length > 800 ? safeDesc.substring(0, 800) : safeDesc;
-            const finalPrompt = `High quality, 3D Pixar style illustration. ${enhancedPrompt}. Bright colors, soft lighting, cute characters, educational context, detailed, 8k resolution.`;
+        const response = await ai.models.generateContent({
+            model: 'models/gemini-2.5-flash',
+            contents: [{
+                parts: [{
+                    text: `أنت مصمم برومبتات احترافية لصور شهادات إبداع تعليمية للأطفال.
+المطلوب: اكتب برومبت واحد باللغة الإنجليزية (بين 60-150 كلمة) لإنشاء صورة شهادة إبداع تبهر الأطفال.
 
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-image', // Nano Banana
-                contents: {
-                    parts: [{ text: finalPrompt }]
-                }
-            });
+الطالب المتميز: ${studentName}
+الدرس/الموضوع الذي تفوق به: ${lessonTopic}
 
-            const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-            if (data) return `data:image/png;base64,${data}`;
-    } catch (apiError: any) {
-        console.warn("Gemini image gen failed:", apiError.message);
+الشروط الإلزامية:
+1. البرومبت يجب أن يصف شهادة باسلوب ديزني أو بيكسار — شخصيات كرتونية محببة ومبهجة
+2. أدمج في التصميم صوراً وشخصيات مرتبطة بالموضوع (${lessonTopic}) — مثلاً لو الدرس عن الماء: قطرات ماء لطيفة، أمواج، أسماك. لو عن النباتات: أزهار، فراشات. اجعل المحتوى التعليمي مرئياً
+3. إطار ذهبي زخرفي، ألوان زاهية دافئة، نجوم وتأثيرات بصرية مشوقة
+4. الصورة خلفية فقط — لا تكتب النص العربي في البرومبت (سيُضاف لاحقاً)
+5. أسلوب يبهر الأطفال: شخصيات كبيرة واضحة، ابتسامات، ألوان ساطعة
+6. أخرِج برومبتاً واحداً بالإنجليزية فقط بدون مقدمة أو تعليق`
+                }]
+            }],
+            config: { temperature: 0.85 }
+        });
+        if (response.usageMetadata) trackUsage('gemini-2.5-flash', response.usageMetadata);
+        const text = (response.text || '').trim();
+        return text || `${CERTIFICATE_STYLE_PROMPTS.pixar}. ${getThemeVisualHint(lessonTopic)}`;
+    } catch (e) {
+        console.error(e);
+        return `${CERTIFICATE_STYLE_PROMPTS.pixar}. ${getThemeVisualHint(lessonTopic)}`;
     }
+};
 
-    return "/fallback-slide.svg";
+/**
+ * توليد صورة شهادة إبداع — portrait عمودية
+ * @param promptOrStyle برومبت مخصص أو اسم النمط: disney | mickey | pixar
+ * @param lessonTopic الدرس لدمج شخصيات ومواضيع مرتبطة به
+ */
+export const generateCertificateImage = async (promptOrStyle: string, lessonTopic?: string): Promise<string | null> => {
+    const styleMap: Record<string, string> = { disney: CERTIFICATE_STYLE_PROMPTS.disney, mickey: CERTIFICATE_STYLE_PROMPTS.mickey, pixar: CERTIFICATE_STYLE_PROMPTS.pixar };
+    let prompt = styleMap[promptOrStyle] || promptOrStyle;
+    const themeHint = lessonTopic ? getThemeVisualHint(lessonTopic) : '';
+    if (themeHint && styleMap[promptOrStyle]) {
+        prompt = `${prompt}. Featuring ${themeHint} integrated into the certificate design, child-appealing cartoon characters related to the lesson theme`;
+    }
+    const safeDesc = (prompt || '').trim();
+    if (!safeDesc) return null;
+
+    const fullPrompt = `${safeDesc}. Award certificate, decorative golden frame, no text, no watermark, high quality, 3D Disney Pixar style, amazing for children`;
+    const geminiResult = await generateImageViaGemini(fullPrompt, '3:4');
+    if (geminiResult) return geminiResult;
+
+    try {
+        const encoded = encodeURIComponent(fullPrompt.substring(0, 350));
+        const seed = Math.floor(Math.random() * 1000000);
+        return `https://image.pollinations.ai/prompt/${encoded}?width=768&height=1024&seed=${seed}&nologo=true&model=flux`;
+    } catch {
+        return null;
+    }
 };
 
 export const generateSongOrStory = async (topic: string, type: 'song' | 'story', grade: string, fileData?: { mimeType: string, data: string }): Promise<SongItem | StoryItem> => {
@@ -541,6 +664,72 @@ export const generateQuiz = async (topic: string, grade: string): Promise<QuizQu
         json = json.replace(/```json/g, '').replace(/```/g, '').trim();
         return JSON.parse(json) as QuizQuestion[];
     } catch (e) { console.error(e); return []; }
+};
+
+/**
+ * توليد ورقة عمل لتقييم فهم الطلاب بناءً على الدرس المولد
+ */
+export const generateWorksheet = async (lesson: LessonPlan): Promise<Worksheet> => {
+    try {
+        const topic = lesson.topic;
+        const grade = lesson.grade;
+        const objectives = (lesson.objectives || []).map(o => o.text).join('\n');
+        const slideSummaries = (lesson.slides || []).slice(0, 8).map(s => `${s.title}: ${s.narration.substring(0, 120)}...`).join('\n');
+
+        const prompt = `
+أنت مصمم أوراق عمل تربوية. أنشئ ورقة عمل لتقييم فهم الطلاب للدرس التالي.
+
+الدرس: "${topic}"
+الصف: "${grade}"
+الأهداف: ${objectives || '—'}
+ملخص الشرائح: ${slideSummaries || '—'}
+
+المطلوب: ورقة عمل متنوعة تتضمن 6-8 أسئلة بأنواع مختلفة:
+1. اختيار من متعدد (mcq): text + options (4 خيارات) + correctAnswer (0-3)
+2. املأ الفراغ (fill_blank): text مع ___ بدل الفراغ + answer (الكلمة الصحيحة)
+3. إجابة قصيرة (short_answer): text + answer
+4. صح/خطأ (true_false): text + options: ["صح", "خطأ"] + correctAnswer (0 أو 1)
+
+أرجع فقط JSON بهذا الشكل (بدون markdown):
+{
+  "title": "ورقة عمل: [عنوان الدرس]",
+  "instructions": "اقرأ كل سؤال بعناية ثم أجب عليه. استخدم القلم للكتابة.",
+  "topic": "${topic}",
+  "grade": "${grade}",
+  "items": [
+    { "id": "1", "type": "mcq", "text": "السؤال...", "options": ["أ", "ب", "ج", "د"], "correctAnswer": 0, "explanation": "..." },
+    { "id": "2", "type": "fill_blank", "text": "الماء ___ في الطبيعة.", "answer": "سائل", "explanation": "..." },
+    { "id": "3", "type": "short_answer", "text": "ما أهمية الماء للحياة؟", "answer": "يشرب ويسقي...", "explanation": "..." },
+    { "id": "4", "type": "true_false", "text": "الماء يتجمد عند الصفر.", "options": ["صح", "خطأ"], "correctAnswer": 0, "explanation": "..." }
+  ]
+}
+
+قواعد: كل النصوص بالعربية. تأكد من تنوع الأنواع. لا تكتب أي شيء غير JSON.
+`;
+
+        const response = await ai.models.generateContent({
+            model: 'models/gemini-2.5-flash',
+            contents: [{ parts: [{ text: prompt }] }],
+            config: { responseMimeType: "application/json", temperature: 0.5 }
+        });
+
+        if (response.usageMetadata) trackUsage('gemini-2.5-flash', response.usageMetadata);
+
+        let json = response.text || "{}";
+        json = json.replace(/```json/g, '').replace(/```/g, '').trim();
+        const data = JSON.parse(json);
+        if (!data.items || !Array.isArray(data.items)) data.items = [];
+        return data as Worksheet;
+    } catch (e) {
+        console.error(e);
+        return {
+            title: `ورقة عمل: ${lesson.topic}`,
+            instructions: 'أجب على الأسئلة التالية',
+            topic: lesson.topic,
+            grade: lesson.grade,
+            items: []
+        };
+    }
 };
 
 export const generateFlashcards = async (topic: string, grade: string): Promise<Flashcard[]> => {

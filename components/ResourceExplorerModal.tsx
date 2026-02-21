@@ -6,7 +6,7 @@ import type { Resource, CurriculumLesson, CurriculumBook } from '../types';
 interface ResourceExplorerModalProps {
   resource: Resource | null;
   onClose: () => void;
-  onGenerate: (topic: string, grade: string, pagesOrTitles: string[], subject?: string) => void;
+  onGenerate: (topic: string, grade: string, pagesOrTitles: string[], subject?: string, part?: string) => void;
   onSaveResource?: (resourceId: string, updates: { data?: any }) => void;
   defaultGrade?: string;
   gradeOptions?: string[];
@@ -126,7 +126,7 @@ export const ResourceExplorerModal: React.FC<ResourceExplorerModalProps> = ({
 
   const handleGenerateForLesson = (lesson: CurriculumLesson, lessonIndex: number) => {
     const acts = selectedActivities[lessonIndex] ?? lesson.activities;
-    onGenerate(lesson.lessonTitle, grade, acts.length ? acts : lesson.activities, curriculum?.bookMetadata?.subject);
+    onGenerate(lesson.lessonTitle, grade, acts.length ? acts : lesson.activities, curriculum?.bookMetadata?.subject, curriculum?.bookMetadata?.part);
     onClose();
   };
 

@@ -49,6 +49,7 @@ export interface LessonPlan {
     topic: string;
     grade: string;
     subject: string;
+    part?: string; // الفصل الدراسي: الفصل الأول / الفصل الثاني
     teacherName?: string; // Added teacher name field
 
     // Section 1: Administrative Data handled by context, but generated partly
@@ -178,6 +179,32 @@ export interface VideoScriptScene {
     duration: string;
 }
 
+/** ورقة عمل — لتقييم فهم الطلاب */
+export type WorksheetItemType = 'mcq' | 'fill_blank' | 'short_answer' | 'true_false';
+
+export interface WorksheetItem {
+    id: string;
+    type: WorksheetItemType;
+    /** نص السؤال أو الجملة (للمتكامل: استخدم ___ للفراغ) */
+    text: string;
+    /** خيارات لـ mcq و true_false */
+    options?: string[];
+    /** 0-based index للخيار الصحيح */
+    correctAnswer?: number;
+    /** الإجابة الصحيحة للنص المفتوح أو الفراغ */
+    answer?: string;
+    /** للتقييم الذاتي — تفسير موجز */
+    explanation?: string;
+}
+
+export interface Worksheet {
+    title: string;
+    instructions?: string;
+    topic: string;
+    grade: string;
+    items: WorksheetItem[];
+}
+
 export interface SmartAssets {
     quiz?: QuizQuestion[];
     flashcards?: Flashcard[];
@@ -257,6 +284,8 @@ export interface StudentGrade {
 export interface Student {
     id: string;
     name: string;
+    /** رقم التسجيل — الرقم الذي يدخله الطالب عند التسجيل للانضمام للفصل */
+    registrationCode?: string;
     dob?: string;
     avatar?: string;
     behaviorNotes?: string;
@@ -306,7 +335,7 @@ export interface LearningUnit {
 export interface Resource {
     id: string;
     title: string;
-    type: 'pdf' | 'image' | 'video' | 'link' | 'template' | 'lesson-plan' | 'song' | 'game' | 'story' | 'simulation';
+    type: 'pdf' | 'image' | 'video' | 'link' | 'template' | 'lesson-plan' | 'song' | 'game' | 'story' | 'simulation' | 'worksheet' | 'certificate';
     url?: string;
     tags: string[];
     content?: any; // Flexible content field for song/story/game data
@@ -335,7 +364,7 @@ export interface StudentWork {
     notes: string;
 }
 
-export type AppView = 'welcome' | 'login-teacher' | 'login-student' | 'dashboard' | 'create-lesson' | 'view-lesson' | 'gamification' | 'simulation' | 'songs' | 'profile' | 'calendar' | 'class-manager' | 'story-weaver' | 'melody-studio' | 'private-vault' | 'curriculum-agent' | 'student-oasis' | 'oasis-command-center';
+export type AppView = 'welcome' | 'login-teacher' | 'login-student' | 'dashboard' | 'create-lesson' | 'view-lesson' | 'gamification' | 'simulation' | 'songs' | 'profile' | 'calendar' | 'class-manager' | 'story-weaver' | 'melody-studio' | 'private-vault' | 'curriculum-agent' | 'student-oasis' | 'oasis-command-center' | 'creativity-studio';
 
 // Curriculum Agent Types (منهاجي)
 export interface KeyVisual {
